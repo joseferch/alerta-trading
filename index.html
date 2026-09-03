@@ -1,0 +1,1646 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0e14">
+<title>Alerta Trading — BB/KC/Volumen</title>
+
+<!-- App instalable -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Alerta Trading">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="description" content="Alertas de compresión Bollinger/Keltner con confirmación de volumen sobre los perpetuos de Bybit.">
+<meta name="color-scheme" content="dark">
+<style>
+:root{
+  --bg:#0b0e14; --panel:#131722; --panel2:#1a1f2e; --line:#242a38;
+  --txt:#e8ecf3; --dim:#8b95a8; --dim2:#5d6779;
+  --buy:#00d68f; --sell:#ff4d6a; --squeeze:#ffc542; --accent:#4d8dff;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--txt); font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+h1,h2,h3{margin:0;font-weight:650;letter-spacing:-.01em}
+button{font:inherit;cursor:pointer;border:0;border-radius:9px;transition:.12s}
+button:active{transform:scale(.97)}
+input,select{
+  font:inherit;background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+  border-radius:8px;padding:7px 9px;width:100%;
+}
+input:focus,select:focus{outline:none;border-color:var(--accent)}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ---------- barra superior ---------- */
+header{
+  position:sticky;top:0;z-index:50;background:rgba(11,14,20,.93);
+  backdrop-filter:blur(12px);border-bottom:1px solid var(--line);
+  padding:calc(10px + env(safe-area-inset-top)) 14px 10px;
+}
+.hrow{display:flex;align-items:center;gap:10px}
+.logo{
+  width:32px;height:32px;border-radius:9px;flex:0 0 auto;display:grid;place-items:center;
+  background:linear-gradient(135deg,var(--buy),var(--accent));font-size:16px;
+}
+.htitle{flex:1;min-width:0}
+.htitle h1{font-size:15px}
+.htitle .sub{font-size:11px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.icobtn{
+  background:var(--panel2);color:var(--txt);width:36px;height:36px;display:grid;place-items:center;
+  font-size:16px;flex:0 0 auto;border:1px solid var(--line);
+}
+.icobtn.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.scanbtn{
+  background:var(--accent);color:#fff;padding:9px 16px;font-weight:650;font-size:13px;flex:0 0 auto;
+}
+.scanbtn:disabled{opacity:.45;cursor:default}
+
+.progress{height:2px;background:var(--line);margin-top:9px;border-radius:2px;overflow:hidden;display:none}
+.progress.on{display:block}
+.progress i{display:block;height:100%;background:var(--accent);width:0;transition:width .2s}
+
+/* ---------- estado ---------- */
+.statusbar{
+  display:flex;gap:8px;flex-wrap:wrap;align-items:center;
+  padding:8px 14px;font-size:11.5px;color:var(--dim);border-bottom:1px solid var(--line);
+  background:var(--panel);
+}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--dim2);display:inline-block;margin-right:5px}
+.dot.live{background:var(--buy);box-shadow:0 0 7px var(--buy);animation:pulse 2s infinite}
+.dot.err{background:var(--sell)}
+@keyframes pulse{50%{opacity:.35}}
+.chip{background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:3px 9px}
+
+/* ---------- banner de alerta ---------- */
+#banner{display:none;padding:0 14px;margin-top:12px}
+#banner.on{display:block}
+.alertcard{
+  border-radius:14px;padding:13px 15px;display:flex;align-items:center;gap:12px;
+  animation:pop .4s cubic-bezier(.2,1.4,.4,1);
+}
+.alertcard.buy{background:linear-gradient(135deg,rgba(0,214,143,.2),rgba(0,214,143,.06));border:1px solid rgba(0,214,143,.5)}
+.alertcard.sell{background:linear-gradient(135deg,rgba(255,77,106,.2),rgba(255,77,106,.06));border:1px solid rgba(255,77,106,.5)}
+@keyframes pop{from{opacity:0;transform:translateY(-8px) scale(.97)}}
+.alertcard .big{font-size:26px}
+.alertcard .txt{flex:1;min-width:0}
+.alertcard .txt b{display:block;font-size:15px}
+.alertcard .txt span{font-size:12px;color:var(--dim)}
+.alertcard .x{background:transparent;color:var(--dim);font-size:20px;padding:0 4px}
+
+/* ---------- pestañas ---------- */
+.tabs{display:flex;gap:6px;padding:12px 14px 0;overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{
+  background:var(--panel);color:var(--dim);padding:8px 13px;font-size:12.5px;font-weight:600;
+  white-space:nowrap;border:1px solid var(--line);
+}
+.tab.on{background:var(--panel2);color:var(--txt);border-color:var(--accent)}
+.tab .n{
+  display:inline-block;margin-left:6px;background:var(--line);color:var(--txt);
+  border-radius:10px;padding:0 6px;font-size:10.5px;font-family:var(--mono);
+}
+.tab.on .n{background:var(--accent);color:#fff}
+
+main{padding:12px 14px 40px}
+
+/* ---------- tarjetas de resultado ---------- */
+.list{display:flex;flex-direction:column;gap:9px}
+.card{
+  background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:12px;
+  cursor:pointer;transition:.14s;position:relative;overflow:hidden;
+}
+.card:hover{border-color:var(--dim2)}
+.card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--line)}
+.card.buy::before{background:var(--buy)}
+.card.sell::before{background:var(--sell)}
+.card.sq::before{background:var(--squeeze)}
+.crow{display:flex;align-items:center;gap:10px}
+.sym{font-weight:700;font-size:14.5px;letter-spacing:-.01em}
+.tagfi{font-size:9px;background:var(--accent);color:#fff;padding:1px 5px;border-radius:4px;vertical-align:middle;margin-left:5px;font-weight:700}
+.badge{
+  font-size:11px;font-weight:750;padding:3px 9px;border-radius:6px;letter-spacing:.03em;
+}
+.badge.buy{background:rgba(0,214,143,.16);color:var(--buy)}
+.badge.sell{background:rgba(255,77,106,.16);color:var(--sell)}
+.badge.sq{background:rgba(255,197,66,.16);color:var(--squeeze)}
+.badge.none{background:var(--panel2);color:var(--dim2)}
+.spacer{flex:1}
+.price{font-family:var(--mono);font-size:13.5px;font-weight:600}
+.meta{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;font-size:11.5px;color:var(--dim)}
+.meta b{color:var(--txt);font-family:var(--mono);font-weight:600}
+.rules{display:flex;gap:5px;margin-top:9px}
+.rule{
+  flex:1;text-align:center;font-size:9.5px;padding:4px 2px;border-radius:6px;
+  background:var(--panel2);color:var(--dim2);border:1px solid transparent;
+}
+.rule.ok{background:rgba(0,214,143,.12);color:var(--buy);border-color:rgba(0,214,143,.3)}
+.rule.no{background:rgba(255,77,106,.08);color:#a8546a}
+
+.empty{text-align:center;padding:48px 20px;color:var(--dim2)}
+.empty .ico{font-size:38px;opacity:.4;margin-bottom:10px}
+.empty p{margin:5px 0;font-size:13px}
+
+/* ---------- panel de configuración ---------- */
+#cfg{display:none;padding:0 14px}
+#cfg.on{display:block}
+.cfgbox{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:14px;margin-top:12px}
+.cfgbox h3{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:11px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:10px}
+.fld label{display:block;font-size:11px;color:var(--dim);margin-bottom:4px}
+.hint{font-size:11px;color:var(--dim2);margin-top:9px;line-height:1.45}
+.switch{display:flex;align-items:center;gap:9px;padding:8px 0;cursor:pointer}
+.switch input{width:auto;margin:0;accent-color:var(--accent);width:17px;height:17px}
+.switch span{font-size:12.5px}
+.btnrow{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.btn2{background:var(--panel2);color:var(--txt);border:1px solid var(--line);padding:9px 14px;font-size:12.5px;font-weight:600;flex:1;min-width:110px}
+.btn2.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn2.warn{color:var(--sell)}
+
+/* ---------- modal de detalle ---------- */
+#modal{
+  position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.72);backdrop-filter:blur(4px);
+  display:none;align-items:flex-end;justify-content:center;
+}
+#modal.on{display:flex}
+.sheet{
+  background:var(--panel);width:100%;max-width:620px;max-height:92vh;overflow-y:auto;
+  border-radius:18px 18px 0 0;border-top:1px solid var(--line);
+  padding:16px 16px calc(24px + env(safe-area-inset-bottom));
+  animation:slide .28s cubic-bezier(.2,.9,.3,1);
+}
+@keyframes slide{from{transform:translateY(40px);opacity:0}}
+@media(min-width:620px){#modal{align-items:center}.sheet{border-radius:18px;border:1px solid var(--line)}}
+.shead{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+canvas{width:100%;height:230px;background:var(--bg);border-radius:11px;border:1px solid var(--line);display:block}
+.leg{display:flex;gap:14px;flex-wrap:wrap;font-size:10.5px;color:var(--dim);margin:8px 0 14px;justify-content:center}
+.leg i{display:inline-block;width:14px;height:2px;vertical-align:middle;margin-right:4px;border-radius:2px}
+table.det{width:100%;border-collapse:collapse;font-size:12.5px}
+table.det td{padding:8px 0;border-bottom:1px solid var(--line)}
+table.det td:first-child{color:var(--dim)}
+table.det td:last-child{text-align:right;font-family:var(--mono);font-weight:600}
+.tvlink{
+  display:block;text-align:center;background:var(--accent);color:#fff;text-decoration:none;
+  padding:12px;border-radius:10px;font-weight:650;font-size:13px;margin-top:14px;
+}
+.disc{font-size:10.5px;color:var(--dim2);text-align:center;margin-top:14px;line-height:1.5}
+
+/* ---------- historial ---------- */
+/* ---------- avisos de instalación y actualización ---------- */
+#instalar,#actualizar{display:none;padding:0 14px;margin-top:12px}
+#instalar.on,#actualizar.on{display:block}
+.aviso{
+  background:var(--panel);border:1px solid var(--accent);border-radius:13px;padding:12px 14px;
+  display:flex;align-items:center;gap:11px;
+}
+.aviso .ic{font-size:20px;flex:0 0 auto}
+.aviso .tx{flex:1;min-width:0;font-size:12.5px;line-height:1.4}
+.aviso .tx b{display:block;font-size:13.5px;margin-bottom:2px}
+.aviso .tx span{color:var(--dim)}
+.aviso button{background:var(--accent);color:#fff;padding:8px 13px;font-size:12.5px;font-weight:650;flex:0 0 auto}
+.aviso .no{background:transparent;color:var(--dim2);padding:8px 4px;font-size:18px}
+
+.hist{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);font-size:12.5px}
+.hist .t{font-family:var(--mono);font-size:11px;color:var(--dim2);flex:0 0 auto}
+
+/* ---------- posiciones en seguimiento ---------- */
+.pos{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:13px;position:relative;overflow:hidden}
+.pos::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px}
+.pos.buy::before{background:var(--buy)} .pos.sell::before{background:var(--sell)}
+.pnl{font-family:var(--mono);font-size:19px;font-weight:700;letter-spacing:-.02em}
+.pnl.up{color:var(--buy)} .pnl.dn{color:var(--sell)} .pnl.flat{color:var(--dim)}
+.bar{position:relative;height:26px;margin:13px 0 6px;border-radius:7px;background:var(--panel2);overflow:hidden;border:1px solid var(--line)}
+.bar .zona{position:absolute;top:0;bottom:0}
+.bar .zroja{background:rgba(255,77,106,.18)} .bar .zverde{background:rgba(0,214,143,.15)}
+.bar .ent{position:absolute;top:0;bottom:0;width:1px;background:var(--dim);opacity:.8}
+.bar .mk{position:absolute;top:50%;transform:translate(-50%,-50%);width:12px;height:12px;border-radius:50%;
+  border:2px solid var(--bg);box-shadow:0 0 0 1px currentColor}
+.bar .mk.up{background:var(--buy);color:var(--buy)} .bar .mk.dn{background:var(--sell);color:var(--sell)}
+.bar .tr{position:absolute;top:0;bottom:0;width:2px;background:var(--squeeze);opacity:.9}
+.barlbl{display:flex;justify-content:space-between;font-size:10px;color:var(--dim2);font-family:var(--mono)}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:9px;margin-top:11px}
+.kv div{background:var(--panel2);border-radius:8px;padding:7px 9px}
+.kv label{display:block;font-size:9.5px;color:var(--dim2);text-transform:uppercase;letter-spacing:.04em}
+.kv b{font-family:var(--mono);font-size:12.5px;font-weight:650}
+.trailon{color:var(--squeeze);font-size:9.5px;font-weight:700;margin-left:4px}
+.posbtns{display:flex;gap:7px;margin-top:11px}
+.posbtns button{flex:1;background:var(--panel2);color:var(--txt);border:1px solid var(--line);padding:8px;font-size:12px;font-weight:600}
+.posbtns button.cerrar{color:var(--sell);border-color:rgba(255,77,106,.35)}
+.seguir{
+  width:100%;background:var(--buy);color:#04120c;padding:12px;border-radius:10px;
+  font-weight:750;font-size:13.5px;margin-top:12px;
+}
+.seguir.sell{background:var(--sell);color:#fff}
+.seguir.ya{background:var(--panel2);color:var(--dim);border:1px solid var(--line)}
+
+/* ---------- estadísticas ---------- */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:9px;margin-bottom:14px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:11px}
+.stat label{display:block;font-size:9.5px;color:var(--dim2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px}
+.stat b{font-family:var(--mono);font-size:17px;font-weight:700;letter-spacing:-.02em}
+.trade{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:11px;position:relative;overflow:hidden}
+.trade::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px}
+.trade.win::before{background:var(--buy)} .trade.loss::before{background:var(--sell)}
+.motivo{font-size:9.5px;padding:2px 7px;border-radius:5px;background:var(--panel2);color:var(--dim);font-weight:650}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hrow">
+    <div class="logo">◈</div>
+    <div class="htitle">
+      <h1>Alerta Trading</h1>
+      <div class="sub" id="subtitle">Bollinger · Keltner · Volumen — Bybit</div>
+    </div>
+    <button class="icobtn" id="btnSound" title="Sonido">🔔</button>
+    <button class="icobtn" id="btnCfg" title="Configuración">⚙</button>
+    <button class="scanbtn" id="btnScan">Escanear</button>
+  </div>
+  <div class="progress" id="prog"><i></i></div>
+</header>
+
+<div class="statusbar">
+  <span><span class="dot" id="dot"></span><span id="stTxt">Sin escanear</span></span>
+  <span class="spacer" style="flex:1"></span>
+  <span class="chip" id="stUni">0 activos</span>
+  <span class="chip" id="stNext">—</span>
+</div>
+
+<div id="actualizar"></div>
+<div id="instalar"></div>
+<div id="banner"></div>
+
+<div id="cfg">
+  <div class="cfgbox">
+    <h3>Cómo funciona</h3>
+    <div class="hint" style="margin-top:0">
+      Cada vez que cierra una vela, la app descarga las velas de todos los activos elegidos y comprueba
+      las cuatro reglas en la última vela <b>cerrada</b>:<br><br>
+      <b>1.</b> En la vela anterior las bandas de Bollinger estaban completamente dentro del canal de Keltner (compresión).<br>
+      <b>2.</b> En la vela actual dejan de estarlo (liberación).<br>
+      <b>3.</b> El cierre queda fuera de Bollinger: arriba → <b style="color:var(--buy)">COMPRA</b>, abajo → <b style="color:var(--sell)">VENTA</b>.<br>
+      <b>4.</b> El volumen de esa vela alcanza el múltiplo exigido de su propia media.<br><br>
+      Son las mismas reglas del indicador de TradingView, con los mismos cálculos que Pine Script
+      (desviación poblacional en Bollinger, ATR suavizado por Wilder, EMA sembrada con SMA).
+      La diferencia es que aquí se vigilan cientos de activos a la vez en vez de diez.<br><br>
+      La pestaña <b>Comprimidos</b> muestra los que aún están dentro del canal: son los candidatos
+      a dar señal en las próximas velas.<br><br>
+      <b>Qué significa cada dirección.</b> <b style="color:var(--buy)">COMPRA</b> es una ruptura al alza:
+      se abre en <b>largo</b> y gana si el precio sigue subiendo.
+      <b style="color:var(--sell)">VENTA</b> es una ruptura a la baja: se abre en <b>corto</b> y gana
+      si el precio sigue bajando — no significa vender lo que ya tienes.<br><br>
+      <b>Sobre el momento.</b> La señal no se adelanta al movimiento: lo confirma. Salta cuando la vela
+      <i>ya cerró</i> fuera de la banda con volumen, así que el impulso ya arrancó y la apuesta es que
+      continúe. Es lo que hace que la señal no se borre, pero entras con el primer tramo ya recorrido.<br><br>
+      <b>Precio de entrada.</b> La operación se registra en la <b>apertura de la vela siguiente</b>,
+      no en el cierre de la vela de señal. Nadie puede comprar al cierre exacto de una vela que acaba de
+      cerrar: darlo por hecho es mirar el futuro, y hace que cualquier prueba salga mejor de lo que sería
+      en la realidad. El stop y el objetivo cuelgan de ese precio de entrada, con el ATR del momento de la señal.
+    </div>
+  </div>
+
+  <div class="cfgbox">
+    <h3>Universo de activos</h3>
+    <div class="grid">
+      <div class="fld">
+        <label>Qué escanear</label>
+        <select id="uni">
+          <option value="todos">Todos los perpetuos USDT</option>
+          <option value="top">Top N por volumen 24h</option>
+          <option value="cripto">Solo cripto principales</option>
+          <option value="original">Los 10 del script original</option>
+          <option value="manual">Lista manual</option>
+        </select>
+      </div>
+      <div class="fld"><label>N (modo Top)</label><input type="number" id="topN" value="60" min="5" max="400"></div>
+      <div class="fld"><label>Volumen 24h mínimo (USD)</label><input type="number" id="minTurn" value="5000000" step="1000000"></div>
+    </div>
+    <div class="fld" style="margin-top:10px"><label>Lista manual (separada por comas)</label>
+      <input id="manual" placeholder="BTCUSDT, ETHUSDT, SOLUSDT"></div>
+    <div class="hint">El filtro de volumen 24h descarta pares sin liquidez, donde el criterio de 1.5× se dispara con muy poco dinero y la señal no es fiable.</div>
+  </div>
+
+  <div class="cfgbox">
+    <h3>Reglas de la señal</h3>
+    <div class="grid">
+      <div class="fld"><label>Temporalidad</label>
+        <select id="tf">
+          <option value="5">5 minutos</option>
+          <option value="15" selected>15 minutos</option>
+          <option value="30">30 minutos</option>
+          <option value="60">1 hora</option>
+          <option value="240">4 horas</option>
+          <option value="D">1 día</option>
+        </select></div>
+      <div class="fld"><label>Bollinger — períodos</label><input type="number" id="bbLen" value="20" min="2"></div>
+      <div class="fld"><label>Bollinger — desviaciones</label><input type="number" id="bbMult" value="2" step="0.1"></div>
+      <div class="fld"><label>Keltner — EMA</label><input type="number" id="kcLen" value="20" min="2"></div>
+      <div class="fld"><label>Keltner — ATR</label><input type="number" id="atrLen" value="20" min="2"></div>
+      <div class="fld"><label>Keltner — múltiplo ATR</label><input type="number" id="kcMult" value="2" step="0.1"></div>
+      <div class="fld"><label>Volumen — SMA</label><input type="number" id="volLen" value="20" min="2"></div>
+      <div class="fld"><label>Volumen — múltiplo mínimo</label><input type="number" id="volMult" value="1.5" step="0.1"></div>
+    </div>
+    <div class="btnrow"><button class="btn2" id="btnReset">Restaurar reglas originales</button></div>
+  </div>
+
+  <div class="cfgbox">
+    <h3>Gestión de la salida</h3>
+    <div class="grid">
+      <div class="fld"><label>Stop inicial (× ATR)</label><input type="number" id="stopMult" value="1.5" step="0.1" min="0.1"></div>
+      <div class="fld"><label>Objetivo (× ATR)</label><input type="number" id="objMult" value="3" step="0.1" min="0.1"></div>
+      <div class="fld"><label>Trailing (× ATR)</label><input type="number" id="trailMult" value="2" step="0.1" min="0.1"></div>
+    </div>
+    <label class="switch"><input type="checkbox" id="usarObjetivo" checked><span>Avisar al alcanzar el objetivo</span></label>
+    <label class="switch"><input type="checkbox" id="usarTrailing" checked><span>Stop dinámico que sigue al precio</span></label>
+    <div class="hint">
+      Al entrar, el stop se coloca a <b>1.5 × ATR</b> por debajo (o encima) del precio de entrada y no se mueve.
+      Cuando la operación avanza a favor, el <b>trailing</b> lo va empujando: se mantiene a 2 × ATR por detrás del mejor
+      precio alcanzado y <b>nunca retrocede</b>. En cuanto supera al stop inicial, toma el relevo — verás la marca
+      <span style="color:var(--squeeze)">TRAILING</span> en la posición.<br><br>
+      El ATR queda congelado en el valor que tenía al abrir el trade, así los niveles no bailan de vela en vela.
+      La entrada que registra la app es el <b>cierre de la vela de la señal</b>: si tardas en seguirla y el precio
+      ya pasó del stop, la operación se cerrará en el primer sondeo — es la respuesta correcta, ese trade ya estaba perdido.
+    </div>
+  </div>
+
+  <div class="cfgbox">
+    <h3>Alertas y automatización</h3>
+    <label class="switch"><input type="checkbox" id="vivo" checked><span>Vigilar posiciones con precio en vivo (15 s)</span></label>
+    <label class="switch"><input type="checkbox" id="autoScan" checked><span>Escanear solo al cierre de cada vela</span></label>
+    <label class="switch"><input type="checkbox" id="notif"><span>Notificaciones del navegador</span></label>
+    <label class="switch"><input type="checkbox" id="sound" checked><span>Sonido al detectar señal</span></label>
+    <label class="switch"><input type="checkbox" id="wake"><span>Mantener la pantalla encendida</span></label>
+    <label class="switch"><input type="checkbox" id="rth" checked><span>Filtro de sesión NY para acciones TradFi</span></label>
+    <div class="hint">La app confirma al cierre de la vela, igual que el indicador de TradingView. Entre cierres no hay nada nuevo que calcular, por eso el escaneo automático se sincroniza con el reloj del mercado.</div>
+  </div>
+
+  <div class="cfgbox">
+    <h3>Conexión</h3>
+    <div class="fld"><label>Servidor de datos</label>
+      <select id="host">
+        <option value="https://api.bybit.com">api.bybit.com (principal)</option>
+        <option value="https://api.bytick.com">api.bytick.com (espejo)</option>
+        <option value="https://api.bybit.nl">api.bybit.nl (Países Bajos)</option>
+      </select></div>
+    <div class="btnrow">
+      <button class="btn2" id="btnTest">Probar conexión</button>
+      <button class="btn2 warn" id="btnClear">Borrar historial</button>
+      <button class="btn2 warn" id="btnClearDiario">Borrar bitácora</button>
+    </div>
+    <div class="hint" id="testOut"></div>
+  </div>
+</div>
+
+<div class="tabs">
+  <button class="tab on" data-tab="sig">Señales <span class="n" id="nSig">0</span></button>
+  <button class="tab" data-tab="pos">Siguiendo <span class="n" id="nPos">0</span></button>
+  <button class="tab" data-tab="diario">Bitácora <span class="n" id="nDia">0</span></button>
+  <button class="tab" data-tab="sq">Comprimidos <span class="n" id="nSq">0</span></button>
+  <button class="tab" data-tab="all">Todos <span class="n" id="nAll">0</span></button>
+  <button class="tab" data-tab="hist">Historial <span class="n" id="nHist">0</span></button>
+</div>
+
+<main><div class="list" id="out"></div></main>
+
+<div id="modal"><div class="sheet" id="sheet"></div></div>
+
+<script>
+/* ============================================================
+   ALERTA TRADING — Bollinger / Keltner / Volumen sobre Bybit
+   Reglas idénticas al indicador Pine "Monitor Bybit 15m".
+   Motor verificado contra una implementación de referencia.
+   ============================================================ */
+
+/* ---------- 1. MOTOR DE INDICADORES (equivalente a ta.* de Pine) ---------- */
+
+function sma(src, len){
+  const out = new Array(src.length).fill(null);
+  for (let i = len - 1; i < src.length; i++){
+    let s = 0, ok = true;
+    for (let j = i - len + 1; j <= i; j++){
+      if (src[j] == null || !isFinite(src[j])){ ok = false; break; }
+      s += src[j];
+    }
+    out[i] = ok ? s / len : null;
+  }
+  return out;
+}
+
+// Promedia las últimas `len` observaciones válidas, ignorando los na.
+function smaSkipNa(src, len){
+  const out = new Array(src.length).fill(null), buf = [];
+  for (let i = 0; i < src.length; i++){
+    if (src[i] != null && isFinite(src[i])){ buf.push(src[i]); if (buf.length > len) buf.shift(); }
+    out[i] = buf.length === len ? buf.reduce((a,b)=>a+b,0)/len : null;
+  }
+  return out;
+}
+
+// Pine ta.stdev es POBLACIONAL (divide entre N)
+function stdev(src, len){
+  const out = new Array(src.length).fill(null);
+  for (let i = len - 1; i < src.length; i++){
+    let m = 0; for (let j = i-len+1; j <= i; j++) m += src[j]; m /= len;
+    let a = 0; for (let j = i-len+1; j <= i; j++){ const d = src[j]-m; a += d*d; }
+    out[i] = Math.sqrt(a/len);
+  }
+  return out;
+}
+
+// EMA de Pine: sembrada con la SMA de las primeras `len` barras
+function ema(src, len){
+  const out = new Array(src.length).fill(null), a = 2/(len+1);
+  let prev = null;
+  for (let i = 0; i < src.length; i++){
+    if (i < len-1) continue;
+    if (prev === null){ let s = 0; for (let j = i-len+1; j <= i; j++) s += src[j]; prev = s/len; }
+    else prev = a*src[i] + (1-a)*prev;
+    out[i] = prev;
+  }
+  return out;
+}
+
+// RMA (suavizado de Wilder), base de ta.atr
+function rma(src, len){
+  const out = new Array(src.length).fill(null), a = 1/len;
+  let prev = null;
+  for (let i = 0; i < src.length; i++){
+    if (i < len-1) continue;
+    if (prev === null){ let s = 0; for (let j = i-len+1; j <= i; j++) s += src[j]; prev = s/len; }
+    else prev = a*src[i] + (1-a)*prev;
+    out[i] = prev;
+  }
+  return out;
+}
+
+function atr(cs, len){
+  const tr = cs.map((c,i)=> i===0 ? c.h-c.l
+    : Math.max(c.h-c.l, Math.abs(c.h-cs[i-1].c), Math.abs(c.l-cs[i-1].c)));
+  return rma(tr, len);
+}
+
+/* ---------- 2. EVALUACIÓN DE LAS CUATRO REGLAS ---------- */
+
+function analizar(cs, C, opts){
+  opts = opts || {};
+  const n = cs.length;
+  if (n < Math.max(C.bbLen, C.kcLen, C.atrLen, C.volLen) + 2)
+    return { ok:false, motivo:'velas insuficientes' };
+
+  const close = cs.map(c=>c.c);
+  const bbBasis = sma(close, C.bbLen);
+  const dev     = stdev(close, C.bbLen);
+  const kcBasis = ema(close, C.kcLen);
+  const atrArr  = atr(cs, C.atrLen);
+
+  // Para TradFi el promedio de volumen usa solo velas de sesión regular:
+  // así el bajo volumen nocturno no cumple el múltiplo artificialmente.
+  const volAvg = opts.soloSesion
+    ? smaSkipNa(cs.map(c=> c.rth ? c.v : null), C.volLen)
+    : sma(cs.map(c=>c.v), C.volLen);
+
+  const bbU=[], bbL=[], kcU=[], kcL=[], sq=[];
+  for (let i = 0; i < n; i++){
+    if (bbBasis[i]==null || dev[i]==null || kcBasis[i]==null || atrArr[i]==null){
+      bbU[i]=bbL[i]=kcU[i]=kcL[i]=null; sq[i]=null; continue;
+    }
+    bbU[i] = bbBasis[i] + C.bbMult*dev[i];
+    bbL[i] = bbBasis[i] - C.bbMult*dev[i];
+    kcU[i] = kcBasis[i] + C.kcMult*atrArr[i];
+    kcL[i] = kcBasis[i] - C.kcMult*atrArr[i];
+    sq[i]  = bbU[i] < kcU[i] && bbL[i] > kcL[i];   // Bollinger dentro de Keltner
+  }
+
+  const i = n - 1;                                  // última vela CERRADA
+  if (sq[i] == null || sq[i-1] == null) return { ok:false, motivo:'calentamiento' };
+
+  const c = cs[i];
+  const ratio  = volAvg[i] > 0 ? c.v / volAvg[i] : null;
+  const antes  = sq[i-1] === true;                  // regla 1
+  const libera = antes && sq[i] === false;          // regla 2
+  const arriba = c.c > bbU[i], abajo = c.c < bbL[i];// regla 3
+  const volOk  = ratio != null && isFinite(ratio) && ratio >= C.volMult; // regla 4
+  const sesOk  = opts.soloSesion ? !!c.rth : true;
+
+  let senal = null;
+  if (sesOk && libera && volOk) senal = arriba ? 'COMPRA' : abajo ? 'VENTA' : null;
+
+  let barras = 0; for (let j = i; j >= 0 && sq[j] === true; j--) barras++;
+
+  // La entrada es la APERTURA de la vela siguiente, no el cierre de la vela de
+  // señal. Si por lo que sea no hay vela en curso, se usa el cierre como respaldo.
+  const hayApertura = opts.aperturaSig != null && isFinite(opts.aperturaSig);
+  const entrada = hayApertura ? opts.aperturaSig : c.c;
+  const a = atrArr[i];
+
+  return {
+    ok:true, senal,
+    reglas:{ antes, libera, fuera: arriba||abajo, volOk, sesOk },
+    cierre:c.c, hora:c.t, volRatio:ratio,
+    entradaRef: entrada, aperturaReal: hayApertura,
+    deslizamiento: c.c > 0 ? (entrada - c.c)/c.c*100 : 0,
+    bbU:bbU[i], bbL:bbL[i], kcU:kcU[i], kcL:kcL[i], atrVal:a,
+    comprimido: sq[i] === true, barrasComprimido: barras,
+    anchoBB: bbBasis[i] > 0 ? (bbU[i]-bbL[i])/bbBasis[i]*100 : null,
+    // Los niveles cuelgan del precio de entrada, con el ATR del momento de la señal
+    stopRef:    senal==='COMPRA' ? entrada - C.stopMult*a : senal==='VENTA' ? entrada + C.stopMult*a : null,
+    objetivoRef:senal==='COMPRA' ? entrada + C.objMult*a  : senal==='VENTA' ? entrada - C.objMult*a  : null,
+    velas: cs, series:{ bbU, bbL, kcU, kcL, sq }
+  };
+}
+
+/* ---------- 3. SESIÓN DE NUEVA YORK (con horario de verano automático) ---------- */
+
+const ACCIONES = new Set(['AAPL','TSLA','NVDA','AMZN','MSFT','META','GOOGL','GOOG','NFLX',
+  'AMD','INTC','COIN','MSTR','PLTR','SPY','QQQ','BABA','DIS','JPM','V','MA','WMT','KO','PEP',
+  'ORCL','CRM','ADBE','AVGO','MU','SMCI','ARM','UBER','ABNB','SHOP','SQ','HOOD','RIVN','LCID']);
+
+const fmtNY = new Intl.DateTimeFormat('en-US', {
+  timeZone:'America/New_York', hour12:false,
+  weekday:'short', hour:'2-digit', minute:'2-digit'
+});
+
+// ¿El timestamp cae dentro de la sesión regular (L-V 09:30–16:00 hora de NY)?
+function enSesionNY(ms){
+  const p = {};
+  for (const x of fmtNY.formatToParts(new Date(ms))) p[x.type] = x.value;
+  if (['Sat','Sun'].includes(p.weekday)) return false;
+  const m = parseInt(p.hour,10)*60 + parseInt(p.minute,10);
+  return m >= 570 && m < 960;   // 9:30 = 570, 16:00 = 960
+}
+
+function esAccion(sym){
+  return ACCIONES.has(sym.replace(/USDT$/,'').replace(/PERP$/,''));
+}
+
+/* ---------- 4. CLIENTE DE LA API PÚBLICA DE BYBIT ---------- */
+
+const MS = { '5':3e5, '15':9e5, '30':18e5, '60':36e5, '240':144e5, 'D':864e5 };
+
+async function api(ruta){
+  const url = S.cfg.host + ruta;
+  const ctl = new AbortController();
+  const t = setTimeout(()=>ctl.abort(), 15000);
+  try{
+    const r = await fetch(url, { signal: ctl.signal, cache:'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    if (j.retCode !== 0) throw new Error(j.retMsg || 'retCode ' + j.retCode);
+    return j.result;
+  } finally { clearTimeout(t); }
+}
+
+// Lista completa de perpetuos lineales con su volumen de 24 h
+async function cargarUniverso(){
+  const res = await api('/v5/market/tickers?category=linear');
+  return (res.list || [])
+    .filter(t => /USDT$/.test(t.symbol))
+    .map(t => ({
+      symbol: t.symbol,
+      turnover: parseFloat(t.turnover24h) || 0,
+      cambio: (parseFloat(t.price24hPcnt) || 0) * 100
+    }))
+    .sort((a,b) => b.turnover - a.turnover);
+}
+
+// Devuelve las velas ya cerradas y, aparte, la APERTURA de la vela en curso.
+// Esa apertura es el precio de entrada real: la señal se confirma al cierre de
+// una vela y la operación se toma en la apertura de la siguiente, nunca al
+// cierre exacto de la vela de señal (eso sería mirar el futuro).
+async function velas(symbol, tf, limite){
+  const res = await api(`/v5/market/kline?category=linear&symbol=${symbol}&interval=${tf}&limit=${limite}`);
+  const dur = MS[tf], ahora = Date.now();
+  const todas = (res.list || [])
+    .map(k => {
+      const t = +k[0];
+      return { t, o:+k[1], h:+k[2], l:+k[3], c:+k[4], v:+k[5], rth: enSesionNY(t) };
+    })
+    .sort((a,b) => a.t - b.t);            // Bybit entrega de la más nueva a la más vieja
+
+  const cerradas = todas.filter(k => k.t + dur <= ahora);
+  const ultimaCerrada = cerradas.length ? cerradas[cerradas.length - 1].t : null;
+  // la vela en curso es la que empieza justo donde terminó la última cerrada
+  const enCurso = ultimaCerrada == null ? null
+    : todas.find(k => k.t === ultimaCerrada + dur);
+  return { cerradas, aperturaSig: enCurso ? enCurso.o : null };
+}
+
+// Ejecuta tareas con un límite de peticiones simultáneas
+async function enTanda(items, limite, fn, onProg){
+  const out = new Array(items.length);
+  let idx = 0, hechos = 0;
+  await Promise.all(Array.from({length: Math.min(limite, items.length)}, async () => {
+    while (idx < items.length){
+      const i = idx++;
+      try { out[i] = await fn(items[i]); }
+      catch(e){ out[i] = { error: e.message || String(e) }; }
+      if (onProg) onProg(++hechos, items.length);
+    }
+  }));
+  return out;
+}
+
+/* ---------- 5. ESTADO Y PERSISTENCIA ---------- */
+
+const POR_DEFECTO = {
+  host:'https://api.bybit.com', uni:'todos', topN:60, minTurn:5000000, manual:'',
+  tf:'15', bbLen:20, bbMult:2, kcLen:20, atrLen:20, kcMult:2, volLen:20, volMult:1.5,
+  stopMult:1.5, objMult:3, trailMult:2, usarObjetivo:true, usarTrailing:true,
+  vivo:true, autoScan:true, notif:false, sound:true, wake:false, rth:true
+};
+const ORIGINALES = ['BTCUSDT','ETHUSDT','SOLUSDT','DOGEUSDT',
+  'AAPLUSDT','TSLAUSDT','NVDAUSDT','AMZNUSDT','MSFTUSDT','METAUSDT'];
+const PRINCIPALES = ['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','BNBUSDT','DOGEUSDT','ADAUSDT',
+  'AVAXUSDT','LINKUSDT','DOTUSDT','MATICUSDT','LTCUSDT','TRXUSDT','ATOMUSDT','NEARUSDT',
+  'APTUSDT','ARBUSDT','OPUSDT','SUIUSDT','INJUSDT'];
+
+const S = {
+  cfg: { ...POR_DEFECTO },
+  universo: [], resultados: [], historial: [],
+  posiciones: [], bitacora: [],
+  tab:'sig', escaneando:false, timer:null, tick:null, vivoTimer:null, wakeLock:null,
+  vistas:new Set(), interactuado:false
+};
+['pointerdown','keydown'].forEach(ev =>
+  addEventListener(ev, () => { S.interactuado = true; }, { once:true, passive:true }));
+
+function guardar(){
+  try{
+    localStorage.setItem('at.cfg', JSON.stringify(S.cfg));
+    localStorage.setItem('at.hist', JSON.stringify(S.historial.slice(0,150)));
+    localStorage.setItem('at.pos', JSON.stringify(S.posiciones));
+    localStorage.setItem('at.diario', JSON.stringify(S.bitacora.slice(0,300)));
+  }catch(e){}
+}
+function cargar(){
+  try{
+    const c = localStorage.getItem('at.cfg');
+    if (c) S.cfg = { ...POR_DEFECTO, ...JSON.parse(c) };
+    const h = localStorage.getItem('at.hist');
+    if (h) S.historial = JSON.parse(h) || [];
+    const p = localStorage.getItem('at.pos');
+    if (p) S.posiciones = JSON.parse(p) || [];
+    const d = localStorage.getItem('at.diario');
+    if (d) S.bitacora = JSON.parse(d) || [];
+    // no volver a avisar de señales ya registradas tras recargar
+    S.historial.forEach(x => S.vistas.add(x.symbol + '|' + x.hora + '|' + x.senal));
+  }catch(e){}
+}
+
+const $ = id => document.getElementById(id);
+const CAMPOS = ['host','uni','topN','minTurn','manual','tf','bbLen','bbMult','kcLen','atrLen',
+  'kcMult','volLen','volMult','stopMult','objMult','trailMult','usarObjetivo','usarTrailing',
+  'vivo','autoScan','notif','sound','wake','rth'];
+
+function cfgAlFormulario(){
+  CAMPOS.forEach(k => {
+    const el = $(k); if (!el) return;
+    if (el.type === 'checkbox') el.checked = !!S.cfg[k]; else el.value = S.cfg[k];
+  });
+}
+function formularioACfg(){
+  CAMPOS.forEach(k => {
+    const el = $(k); if (!el) return;
+    if (el.type === 'checkbox') S.cfg[k] = el.checked;
+    else if (el.type === 'number') S.cfg[k] = parseFloat(el.value) || POR_DEFECTO[k];
+    else S.cfg[k] = el.value;
+  });
+  guardar();
+  actualizarSubtitulo();
+  programarAuto();
+}
+
+function actualizarSubtitulo(){
+  const c = S.cfg;
+  $('subtitle').textContent =
+    `BB ${c.bbLen},${c.bbMult} · KC EMA${c.kcLen}±${c.kcMult}·ATR${c.atrLen} · Vol ≥${c.volMult}× · ${c.tf==='D'?'1D':c.tf+'m'}`;
+}
+
+/* ---------- 6. FORMATO ---------- */
+
+function precio(x){
+  if (x == null || !isFinite(x)) return '—';
+  const a = Math.abs(x);
+  return x.toLocaleString('en-US', {
+    minimumFractionDigits: a >= 1000 ? 2 : a >= 1 ? 4 : a >= 0.01 ? 5 : 8,
+    maximumFractionDigits: a >= 1000 ? 2 : a >= 1 ? 4 : a >= 0.01 ? 5 : 8
+  });
+}
+function usd(x){
+  if (!isFinite(x)) return '—';
+  if (x >= 1e9) return (x/1e9).toFixed(1) + ' MM';
+  if (x >= 1e6) return (x/1e6).toFixed(1) + ' M';
+  if (x >= 1e3) return (x/1e3).toFixed(0) + ' k';
+  return x.toFixed(0);
+}
+const hora = ms => new Date(ms).toLocaleTimeString('es', {hour:'2-digit', minute:'2-digit'});
+const fecha = ms => new Date(ms).toLocaleString('es', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
+function duracion(ms){
+  const m = Math.round(ms/60000);
+  if (m < 60) return m + ' min';
+  const h = Math.floor(m/60);
+  return h < 24 ? h + ' h ' + (m%60) + ' min' : Math.floor(h/24) + ' d ' + (h%24) + ' h';
+}
+const pc = x => (x >= 0 ? '+' : '') + x.toFixed(2) + ' %';
+
+/* ---------- 7. ESCANEO ---------- */
+
+function estado(txt, clase){
+  $('stTxt').textContent = txt;
+  $('dot').className = 'dot' + (clase ? ' ' + clase : '');
+}
+
+async function resolverUniverso(){
+  const c = S.cfg;
+  if (c.uni === 'manual'){
+    const l = c.manual.split(/[,\s]+/).map(s=>s.trim().toUpperCase()).filter(Boolean);
+    return l.map(symbol => ({ symbol, turnover:0, cambio:0 }));
+  }
+  if (c.uni === 'original') return ORIGINALES.map(symbol => ({ symbol, turnover:0, cambio:0 }));
+
+  let lista = await cargarUniverso();     // datos reales del mercado
+  if (c.uni === 'cripto'){
+    const set = new Set(PRINCIPALES);
+    return lista.filter(t => set.has(t.symbol));
+  }
+  lista = lista.filter(t => t.turnover >= c.minTurn);
+  if (c.uni === 'top') lista = lista.slice(0, c.topN);
+  return lista;
+}
+
+async function escanear(){
+  if (S.escaneando) return;
+  S.escaneando = true;
+  $('btnScan').disabled = true;
+  $('prog').classList.add('on');
+  estado('Cargando universo…');
+
+  try{
+    const uni = await resolverUniverso();
+    S.universo = uni;
+    $('stUni').textContent = uni.length + ' activos';
+    if (!uni.length){ estado('Universo vacío — revise los filtros', 'err'); return; }
+
+    const c = S.cfg;
+    const necesarias = Math.max(c.bbLen, c.kcLen, c.atrLen, c.volLen);
+    // Con filtro de sesión hacen falta muchas más velas para juntar 20 de sesión regular
+    const limite = Math.min(1000, Math.max(necesarias * (c.rth ? 8 : 3), 100));
+
+    estado(`Analizando ${uni.length} activos…`);
+    const barra = $('prog').firstElementChild;
+
+    const res = await enTanda(uni, 6, async (t) => {
+      const { cerradas, aperturaSig } = await velas(t.symbol, c.tf, limite);
+      const accion = esAccion(t.symbol);
+      const r = analizar(cerradas, c, { soloSesion: c.rth && accion, aperturaSig });
+      return { ...t, accion, ...r };
+    }, (hechos, total) => {
+      barra.style.width = (hechos/total*100) + '%';
+      if (hechos % 10 === 0) estado(`Analizando… ${hechos}/${total}`);
+    });
+
+    const errores = res.filter(r => r && r.error).length;
+    S.resultados = res.filter(r => r && r.ok);
+    S.resultados.sort((a,b) =>
+      (b.senal?2:0) - (a.senal?2:0) ||
+      (b.comprimido?1:0) - (a.comprimido?1:0) ||
+      (b.volRatio||0) - (a.volRatio||0));
+
+    registrarSenales(S.resultados.filter(r => r.senal));
+    estado(`Listo ${hora(Date.now())}` + (errores ? ` · ${errores} sin datos` : ''), 'live');
+    pintar();
+  }catch(e){
+    estado('Error: ' + (e.message || e), 'err');
+    if (!S.resultados.length) pintarError(e);
+  }finally{
+    S.escaneando = false;
+    $('btnScan').disabled = false;
+    $('prog').classList.remove('on');
+    $('prog').firstElementChild.style.width = '0';
+    programarAuto();
+  }
+}
+
+/* ---------- 8. ALERTAS ---------- */
+
+function registrarSenales(nuevas){
+  const frescas = [];
+  for (const r of nuevas){
+    const clave = r.symbol + '|' + r.hora + '|' + r.senal;
+    if (S.vistas.has(clave)) continue;
+    S.vistas.add(clave);
+    const reg = { symbol:r.symbol, senal:r.senal, cierre:r.cierre,
+                  volRatio:r.volRatio, hora:r.hora, tf:S.cfg.tf, ts:Date.now() };
+    S.historial.unshift(reg);
+    frescas.push(r);
+  }
+  if (!frescas.length) return;
+  S.historial = S.historial.slice(0, 150);
+  guardar();
+  avisar(frescas);
+}
+
+function avisar(lista){
+  const r = lista[0];
+  const extra = lista.length > 1 ? ` (+${lista.length-1} más)` : '';
+  const texto = `${r.symbol} — ${r.senal} a ${precio(r.cierre)} · volumen ${r.volRatio.toFixed(2)}×${extra}`;
+
+  $('banner').className = 'on';
+  $('banner').innerHTML =
+    `<div class="alertcard ${r.senal==='COMPRA'?'buy':'sell'}">
+       <div class="big">${r.senal==='COMPRA'?'▲':'▼'}</div>
+       <div class="txt"><b>SEÑAL CONFIRMADA · ${r.senal}</b><span>${texto}</span></div>
+       <button class="x" onclick="document.getElementById('banner').className=''">×</button>
+     </div>`;
+
+  if (S.cfg.sound) sonar(r.senal === 'COMPRA');
+  if (S.cfg.notif && 'Notification' in window && Notification.permission === 'granted'){
+    try{
+      new Notification(`SEÑAL ${r.senal} — ${r.symbol}`, {
+        body: texto + '\nVerifique el gráfico antes de operar.',
+        tag: 'alerta-trading', renotify: true
+      });
+    }catch(e){}
+  }
+  // El navegador solo permite vibrar después de que el usuario haya tocado la página
+  if (S.interactuado && navigator.vibrate) try{ navigator.vibrate([120,60,120]); }catch(e){}
+}
+
+// Tono generado con WebAudio — sin archivos externos
+function sonar(alcista){
+  try{
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AC();
+    const notas = alcista ? [523.25, 659.25, 783.99] : [783.99, 659.25, 523.25];
+    notas.forEach((f, i) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'sine'; o.frequency.value = f;
+      o.connect(g); g.connect(ctx.destination);
+      const t0 = ctx.currentTime + i*0.16;
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(0.25, t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.30);
+      o.start(t0); o.stop(t0 + 0.32);
+    });
+    setTimeout(()=>ctx.close(), 1500);
+  }catch(e){}
+}
+
+/* ============================================================
+   8b. SEGUIMIENTO DE OPERACIONES
+
+   Al abrir, el stop queda fijo a `stopMult × ATR` de la entrada y el
+   objetivo a `objMult × ATR`. El ATR se congela en el valor que tenía
+   al entrar, para que los niveles no cambien de vela en vela.
+
+   El trailing se mantiene a `trailMult × ATR` por detrás del mejor
+   precio alcanzado y nunca retrocede. El stop efectivo es siempre el
+   más protector de los dos, así que el trailing solo toma el relevo
+   cuando ya supera al stop inicial.
+   ============================================================ */
+
+function abrirPosicion(r){
+  if (S.posiciones.some(p => p.abierta && p.symbol === r.symbol)) return null;
+  const c = S.cfg, largo = r.senal === 'COMPRA';
+  const atrV = r.atrVal;
+  // Entrada = apertura de la vela siguiente a la señal (respaldo: cierre de la señal)
+  const entrada = (r.entradaRef != null && isFinite(r.entradaRef)) ? r.entradaRef : r.cierre;
+  const p = {
+    id: 'p' + Date.now() + Math.random().toString(36).slice(2,6),
+    symbol: r.symbol, dir: r.senal, tf: c.tf, accion: !!r.accion,
+    entrada, entradaTs: Date.now(), velaTs: r.hora, atr: atrV,
+    cierreSenal: r.cierre, aperturaReal: !!r.aperturaReal,
+    stopMult: c.stopMult, objMult: c.objMult, trailMult: c.trailMult,
+    usarTrailing: c.usarTrailing, usarObjetivo: c.usarObjetivo,
+    stopFijo:  largo ? entrada - c.stopMult*atrV : entrada + c.stopMult*atrV,
+    objetivo:  largo ? entrada + c.objMult*atrV  : entrada - c.objMult*atrV,
+    extremo: entrada, ultimo: entrada, trailActivo: false,
+    maxFavPct: 0, maxAdvPct: 0, abierta: true
+  };
+  p.stopActual = p.stopFijo;
+  p.riesgo = Math.abs(entrada - p.stopFijo);
+  S.posiciones.unshift(p);
+  guardar();
+  return p;
+}
+
+// Aplica el último precio: mueve el trailing y decide si toca salir.
+function actualizarPos(p, px){
+  if (!p.abierta || !isFinite(px)) return null;
+  const largo = p.dir === 'COMPRA';
+  p.ultimo = px;
+
+  const pct = largo ? (px - p.entrada)/p.entrada*100 : (p.entrada - px)/p.entrada*100;
+  if (pct > p.maxFavPct) p.maxFavPct = pct;
+  if (pct < p.maxAdvPct) p.maxAdvPct = pct;
+
+  if (largo){
+    if (px > p.extremo) p.extremo = px;
+    const trail = p.extremo - p.trailMult*p.atr;
+    p.stopActual = p.usarTrailing ? Math.max(p.stopFijo, trail) : p.stopFijo;
+    p.trailActivo = p.usarTrailing && trail > p.stopFijo;
+    if (px <= p.stopActual) return p.trailActivo ? 'TRAILING' : 'STOP';
+    if (p.usarObjetivo && px >= p.objetivo) return 'OBJETIVO';
+  } else {
+    if (px < p.extremo) p.extremo = px;
+    const trail = p.extremo + p.trailMult*p.atr;
+    p.stopActual = p.usarTrailing ? Math.min(p.stopFijo, trail) : p.stopFijo;
+    p.trailActivo = p.usarTrailing && trail < p.stopFijo;
+    if (px >= p.stopActual) return p.trailActivo ? 'TRAILING' : 'STOP';
+    if (p.usarObjetivo && px <= p.objetivo) return 'OBJETIVO';
+  }
+  return null;
+}
+
+function cerrarPos(p, px, motivo){
+  const largo = p.dir === 'COMPRA';
+  p.abierta = false;
+  p.salida = px;
+  p.salidaTs = Date.now();
+  p.motivo = motivo;
+  p.pct = largo ? (px - p.entrada)/p.entrada*100 : (p.entrada - px)/p.entrada*100;
+  // Múltiplo R: cuántas veces el riesgo inicial se ganó o se perdió
+  p.r = p.riesgo > 0 ? (largo ? px - p.entrada : p.entrada - px)/p.riesgo : 0;
+  p.duracion = p.salidaTs - p.entradaTs;
+  S.bitacora.unshift(p);
+  S.posiciones = S.posiciones.filter(x => x.id !== p.id);
+  guardar();
+  return p;
+}
+
+const MOTIVOS = {
+  OBJETIVO:'Objetivo alcanzado', TRAILING:'Stop dinámico',
+  STOP:'Stop inicial', MANUAL:'Cierre manual'
+};
+
+// Un solo sondeo trae el precio de todos los símbolos seguidos.
+async function vigilar(){
+  const abiertas = S.posiciones.filter(p => p.abierta);
+  if (!abiertas.length) return;
+  let mapa;
+  try{
+    const res = await api('/v5/market/tickers?category=linear');
+    mapa = new Map((res.list||[]).map(t => [t.symbol, parseFloat(t.lastPrice)]));
+  }catch(e){ return; }
+
+  const cerradas = [];
+  for (const p of abiertas){
+    const px = mapa.get(p.symbol);
+    if (px == null || !isFinite(px)) continue;
+    const motivo = actualizarPos(p, px);
+    if (motivo) cerradas.push(cerrarPos(p, px, motivo));
+  }
+  guardar();
+  if (cerradas.length) avisarSalida(cerradas);
+  // Repintar solo si el usuario está viendo algo que cambió
+  if (cerradas.length || S.tab === 'pos' || S.tab === 'diario') pintar();
+}
+
+function arrancarVivo(){
+  clearInterval(S.vivoTimer);
+  if (!S.cfg.vivo) return;
+  S.vivoTimer = setInterval(() => {
+    if (S.posiciones.some(p => p.abierta) && !document.hidden) vigilar();
+  }, 15000);
+}
+
+function avisarSalida(lista){
+  const p = lista[0];
+  const gana = p.pct >= 0;
+  const extra = lista.length > 1 ? ` (+${lista.length-1} más)` : '';
+  const texto = `${p.symbol} — ${MOTIVOS[p.motivo]} a ${precio(p.salida)} · ` +
+                `${gana?'+':''}${p.pct.toFixed(2)}% (${p.r>=0?'+':''}${p.r.toFixed(2)}R)${extra}`;
+
+  $('banner').className = 'on';
+  $('banner').innerHTML =
+    `<div class="alertcard ${gana?'buy':'sell'}">
+       <div class="big">${gana?'✓':'✕'}</div>
+       <div class="txt"><b>SALIR · ${p.symbol}</b><span>${texto}</span></div>
+       <button class="x" onclick="document.getElementById('banner').className=''">×</button>
+     </div>`;
+
+  if (S.cfg.sound) sonar(gana);
+  if (S.cfg.notif && 'Notification' in window && Notification.permission === 'granted'){
+    try{
+      new Notification(`SALIR — ${p.symbol}`, {
+        body: texto, tag:'salida-'+p.id, renotify:true
+      });
+    }catch(e){}
+  }
+  if (S.interactuado && navigator.vibrate) try{ navigator.vibrate([200,80,200,80,200]); }catch(e){}
+}
+
+/* Estadísticas de la bitácora */
+function estadisticas(){
+  const t = S.bitacora;
+  if (!t.length) return null;
+  const g = t.filter(x => x.pct > 0), pd = t.filter(x => x.pct <= 0);
+  const sum = a => a.reduce((s,x) => s + x, 0);
+  const gPct = sum(g.map(x => x.pct)), pPct = Math.abs(sum(pd.map(x => x.pct)));
+  return {
+    n: t.length,
+    ganadores: g.length,
+    tasa: g.length/t.length*100,
+    mediaGana: g.length ? gPct/g.length : 0,
+    mediaPierde: pd.length ? -pPct/pd.length : 0,
+    totalPct: sum(t.map(x => x.pct)),
+    totalR: sum(t.map(x => x.r || 0)),
+    factor: pPct > 0 ? gPct/pPct : (gPct > 0 ? Infinity : 0),
+    duracionMedia: sum(t.map(x => x.duracion || 0))/t.length
+  };
+}
+
+/* ---------- 9. ESCANEO AUTOMÁTICO AL CIERRE DE VELA ---------- */
+
+function msHastaCierre(){
+  const dur = MS[S.cfg.tf] || 9e5;
+  return dur - (Date.now() % dur);
+}
+
+function programarAuto(){
+  clearTimeout(S.timer); clearInterval(S.tick);
+  if (!S.cfg.autoScan){ $('stNext').textContent = 'auto: apagado'; return; }
+
+  const espera = msHastaCierre() + 6000;   // 6 s de margen para que el exchange publique la vela
+  S.timer = setTimeout(()=>{ escanear(); }, espera);
+
+  const meta = Date.now() + espera;
+  S.tick = setInterval(()=>{
+    const q = Math.max(0, meta - Date.now());
+    const m = Math.floor(q/60000), s = Math.floor(q%60000/1000);
+    $('stNext').textContent = `próximo en ${m}:${String(s).padStart(2,'0')}`;
+  }, 1000);
+}
+
+/* ---------- 10. INTERFAZ ---------- */
+
+function pintarError(e){
+  $('out').innerHTML =
+    `<div class="empty"><div class="ico">⚠</div>
+      <p><b>No se pudo conectar con Bybit</b></p>
+      <p class="mono" style="font-size:11px">${String(e.message || e)}</p>
+      <p style="margin-top:14px">Pruebe otro servidor en <b>⚙ Configuración → Conexión</b>,
+      o abra la app desde un navegador con acceso a Bybit en su región.</p></div>`;
+}
+
+function tarjeta(r){
+  const cl = r.senal === 'COMPRA' ? 'buy' : r.senal === 'VENTA' ? 'sell' : r.comprimido ? 'sq' : '';
+  const insignia = r.senal
+    ? `<span class="badge ${r.senal==='COMPRA'?'buy':'sell'}">${r.senal}</span>`
+    : r.comprimido
+      ? `<span class="badge sq">COMPRIMIDO ${r.barrasComprimido}</span>`
+      : `<span class="badge none">—</span>`;
+  const R = r.reglas;
+  return `<div class="card ${cl}" data-sym="${r.symbol}">
+    <div class="crow">
+      <span class="sym">${r.symbol}${r.accion?'<span class="tagfi">TradFi</span>':''}</span>
+      ${insignia}<span class="spacer"></span>
+      <span class="price">${precio(r.cierre)}</span>
+    </div>
+    <div class="meta">
+      <span>Vol <b>${r.volRatio!=null&&isFinite(r.volRatio)?r.volRatio.toFixed(2)+'×':'—'}</b></span>
+      <span>Ancho BB <b>${r.anchoBB!=null?r.anchoBB.toFixed(2)+'%':'—'}</b></span>
+      ${r.turnover?`<span>24h <b>$${usd(r.turnover)}</b></span>`:''}
+      <span>Cierre <b>${hora(r.hora)}</b></span>
+    </div>
+    <div class="rules">
+      <div class="rule ${R.antes?'ok':'no'}">1 Compresión</div>
+      <div class="rule ${R.libera?'ok':'no'}">2 Liberación</div>
+      <div class="rule ${R.fuera?'ok':'no'}">3 Fuera BB</div>
+      <div class="rule ${R.volOk?'ok':'no'}">4 Volumen</div>
+      ${r.accion?`<div class="rule ${R.sesOk?'ok':'no'}">Sesión</div>`:''}
+    </div>
+  </div>`;
+}
+
+/* Tarjeta de una posición en seguimiento, con barra stop → objetivo */
+function tarjetaPos(p){
+  const largo = p.dir === 'COMPRA';
+  const pct = largo ? (p.ultimo - p.entrada)/p.entrada*100 : (p.entrada - p.ultimo)/p.entrada*100;
+  const rAct = p.riesgo > 0 ? (largo ? p.ultimo - p.entrada : p.entrada - p.ultimo)/p.riesgo : 0;
+  const cls = pct > 0.02 ? 'up' : pct < -0.02 ? 'dn' : 'flat';
+
+  // La barra va del stop actual al objetivo, en el sentido de la operación
+  const lo = Math.min(p.stopActual, p.objetivo), hi = Math.max(p.stopActual, p.objetivo);
+  const posX = v => Math.max(0, Math.min(100, (v - lo)/(hi - lo)*100));
+  const xPrecio = posX(p.ultimo), xEntrada = posX(p.entrada);
+  // zona roja = del stop hasta la entrada; verde = de la entrada al objetivo
+  const zIni = Math.min(xEntrada, largo ? 0 : 100), zFin = Math.max(xEntrada, largo ? 0 : 100);
+
+  return `<div class="pos ${largo?'buy':'sell'}">
+    <div class="crow">
+      <span class="sym">${p.symbol}${p.accion?'<span class="tagfi">TradFi</span>':''}</span>
+      <span class="badge ${largo?'buy':'sell'}">${p.dir}</span>
+      <span style="font-size:10.5px;color:var(--dim2)">${largo?'largo':'corto'}</span>
+      <span class="spacer"></span>
+      <span class="pnl ${cls}">${pc(pct)}</span>
+    </div>
+    <div class="bar">
+      <div class="zona zroja" style="left:${Math.min(zIni,zFin)}%;width:${Math.abs(zFin-zIni)}%"></div>
+      <div class="zona zverde" style="left:${largo?xEntrada:0}%;width:${largo?100-xEntrada:xEntrada}%"></div>
+      <div class="ent" style="left:${xEntrada}%"></div>
+      ${p.trailActivo?`<div class="tr" style="left:${posX(p.stopActual)}%"></div>`:''}
+      <div class="mk ${cls==='dn'?'dn':'up'}" style="left:${xPrecio}%"></div>
+    </div>
+    <div class="barlbl">
+      <span>stop ${precio(p.stopActual)}</span>
+      <span>objetivo ${precio(p.objetivo)}</span>
+    </div>
+    <div class="kv">
+      <div><label>Entrada${p.aperturaReal ? '<span style="color:var(--dim2);font-size:9px"> ap. sig.</span>' : ''}</label><b>${precio(p.entrada)}</b></div>
+      <div><label>Actual</label><b>${precio(p.ultimo)}</b></div>
+      <div><label>Stop${p.trailActivo?'<span class="trailon">TRAILING</span>':''}</label><b>${precio(p.stopActual)}</b></div>
+      <div><label>R actual</label><b class="${rAct>=0?'':''}">${rAct>=0?'+':''}${rAct.toFixed(2)}R</b></div>
+      <div><label>Máximo a favor</label><b>${pc(p.maxFavPct)}</b></div>
+      <div><label>Tiempo</label><b>${duracion(Date.now()-p.entradaTs)}</b></div>
+    </div>
+    <div class="posbtns">
+      <button data-ver="${p.symbol}">Ver gráfico</button>
+      <button class="cerrar" data-cerrar="${p.id}">Cerrar ahora</button>
+    </div>
+  </div>`;
+}
+
+function filaTrade(t){
+  const gana = t.pct > 0;
+  return `<div class="trade ${gana?'win':'loss'}">
+    <div class="crow">
+      <span class="sym" style="font-size:13.5px">${t.symbol}</span>
+      <span class="badge ${t.dir==='COMPRA'?'buy':'sell'}" style="font-size:10px">${t.dir}</span>
+      <span class="motivo">${MOTIVOS[t.motivo]||t.motivo}</span>
+      <span class="spacer"></span>
+      <span class="pnl ${gana?'up':'dn'}" style="font-size:15px">${pc(t.pct)}</span>
+    </div>
+    <div class="meta">
+      <span>Entrada <b>${precio(t.entrada)}</b></span>
+      <span>Salida <b>${precio(t.salida)}</b></span>
+      <span>R <b>${t.r>=0?'+':''}${(t.r||0).toFixed(2)}</b></span>
+      <span>Duró <b>${duracion(t.duracion)}</b></span>
+      <span>${fecha(t.entradaTs)}</span>
+    </div>
+  </div>`;
+}
+
+function panelEstadisticas(){
+  const e = estadisticas();
+  if (!e) return '';
+  const col = v => v > 0 ? 'var(--buy)' : v < 0 ? 'var(--sell)' : 'var(--txt)';
+  return `<div class="stats">
+    <div class="stat"><label>Operaciones</label><b>${e.n}</b></div>
+    <div class="stat"><label>Tasa de acierto</label><b>${e.tasa.toFixed(0)} %</b></div>
+    <div class="stat"><label>Resultado total</label><b style="color:${col(e.totalPct)}">${pc(e.totalPct)}</b></div>
+    <div class="stat"><label>Total en R</label><b style="color:${col(e.totalR)}">${e.totalR>=0?'+':''}${e.totalR.toFixed(2)}R</b></div>
+    <div class="stat"><label>Ganancia media</label><b style="color:var(--buy)">${pc(e.mediaGana)}</b></div>
+    <div class="stat"><label>Pérdida media</label><b style="color:var(--sell)">${pc(e.mediaPierde)}</b></div>
+    <div class="stat"><label>Factor beneficio</label><b>${e.factor===Infinity?'∞':e.factor.toFixed(2)}</b></div>
+    <div class="stat"><label>Duración media</label><b style="font-size:13px">${duracion(e.duracionMedia)}</b></div>
+  </div>`;
+}
+
+function pintar(){
+  const senales = S.resultados.filter(r => r.senal);
+  const comprimidos = S.resultados.filter(r => !r.senal && r.comprimido);
+  const abiertas = S.posiciones.filter(p => p.abierta);
+  $('nSig').textContent = senales.length;
+  $('nSq').textContent = comprimidos.length;
+  $('nAll').textContent = S.resultados.length;
+  $('nHist').textContent = S.historial.length;
+  $('nPos').textContent = abiertas.length;
+  $('nDia').textContent = S.bitacora.length;
+
+  const out = $('out');
+
+  if (S.tab === 'pos'){
+    out.innerHTML = abiertas.length
+      ? abiertas.map(tarjetaPos).join('')
+      : `<div class="empty"><div class="ico">🎯</div>
+          <p><b>No estás siguiendo ninguna operación</b></p>
+          <p>Abre una señal desde la pestaña <b>Señales</b> y pulsa
+          <b>Seguir esta operación</b> para que la app te avise cuándo salir.</p></div>`;
+    return;
+  }
+
+  if (S.tab === 'diario'){
+    out.innerHTML = S.bitacora.length
+      ? panelEstadisticas() + S.bitacora.map(filaTrade).join('')
+      : `<div class="empty"><div class="ico">📊</div>
+          <p><b>Bitácora vacía</b></p>
+          <p>Cada operación que sigas y se cierre aparecerá aquí con su motivo de salida,
+          resultado en % y en múltiplos de R, más las estadísticas acumuladas.</p></div>`;
+    return;
+  }
+
+  if (S.tab === 'hist'){
+    out.innerHTML = S.historial.length
+      ? S.historial.map(h => `<div class="hist">
+          <span class="t">${fecha(h.hora)}</span>
+          <b>${h.symbol}</b>
+          <span class="badge ${h.senal==='COMPRA'?'buy':'sell'}">${h.senal}</span>
+          <span class="spacer"></span>
+          <span class="mono" style="font-size:11.5px">${precio(h.cierre)} · ${h.volRatio?h.volRatio.toFixed(2):'—'}×</span>
+        </div>`).join('')
+      : `<div class="empty"><div class="ico">🗒</div><p>Aún no hay señales registradas</p></div>`;
+    return;
+  }
+
+  const datos = S.tab === 'sig' ? senales : S.tab === 'sq' ? comprimidos : S.resultados;
+
+  if (!S.resultados.length){
+    out.innerHTML = `<div class="empty"><div class="ico">◈</div>
+      <p><b>Listo para escanear</b></p>
+      <p>Pulse <b>Escanear</b> para analizar el mercado con sus reglas.</p></div>`;
+    return;
+  }
+  if (!datos.length){
+    const msg = S.tab === 'sig'
+      ? ['🔍','Ninguna señal confirmada','Las cuatro reglas deben cumplirse en la misma vela. Revise <b>Comprimidos</b> para ver qué activos están por liberarse.']
+      : ['📉','Ningún activo comprimido','Ahora mismo ningún par tiene las Bollinger dentro del Keltner.'];
+    out.innerHTML = `<div class="empty"><div class="ico">${msg[0]}</div><p><b>${msg[1]}</b></p><p>${msg[2]}</p></div>`;
+    return;
+  }
+  out.innerHTML = datos.map(tarjeta).join('');
+}
+
+/* ---------- 11. DETALLE CON GRÁFICO ---------- */
+
+function abrirDetalle(sym){
+  const r = S.resultados.find(x => x.symbol === sym);
+  if (!r){
+    // El activo ya no está en el último escaneo (p. ej. cambió el universo)
+    $('sheet').innerHTML =
+      `<div class="shead"><div style="flex:1"><h2 style="font-size:18px">${sym}</h2>
+         <div style="font-size:11.5px;color:var(--dim)">Sin datos en el último escaneo</div></div>
+       <button class="icobtn" onclick="cerrarModal()">×</button></div>
+       <p class="hint">Este activo no entró en el escaneo más reciente. Vuelve a escanear,
+       o revísalo directamente en TradingView.</p>
+       <a class="tvlink" target="_blank" rel="noopener"
+          href="https://www.tradingview.com/chart/?symbol=BYBIT:${sym}.P&interval=${S.cfg.tf}">
+          Abrir en TradingView →</a>`;
+    $('modal').className = 'on';
+    return;
+  }
+  const R = r.reglas;
+  const fila = (a,b) => `<tr><td>${a}</td><td>${b}</td></tr>`;
+  const si = b => b ? '<span style="color:var(--buy)">SÍ</span>' : '<span style="color:var(--sell)">NO</span>';
+
+  $('sheet').innerHTML = `
+    <div class="shead">
+      <div style="flex:1">
+        <h2 style="font-size:18px">${r.symbol}${r.accion?'<span class="tagfi">TradFi</span>':''}</h2>
+        <div style="font-size:11.5px;color:var(--dim)">Vela de ${S.cfg.tf==='D'?'1 día':S.cfg.tf+' min'} cerrada a las ${hora(r.hora)}</div>
+        ${r.senal?`<div style="font-size:11.5px;color:${r.senal==='COMPRA'?'var(--buy)':'var(--sell)'};margin-top:2px">
+          ${r.senal==='COMPRA'
+            ? 'Rompió al alza — posición <b>larga</b>, gana si sigue subiendo'
+            : 'Rompió a la baja — posición <b>corta</b>, gana si sigue bajando'}</div>`:''}
+      </div>
+      ${r.senal?`<span class="badge ${r.senal==='COMPRA'?'buy':'sell'}" style="font-size:13px;padding:6px 12px">${r.senal}</span>`
+               :`<span class="badge ${r.comprimido?'sq':'none'}">${r.comprimido?'COMPRIMIDO':'SIN SEÑAL'}</span>`}
+      <button class="icobtn" onclick="cerrarModal()">×</button>
+    </div>
+    <canvas id="cv"></canvas>
+    <div class="leg">
+      <span><i style="background:#4d8dff"></i>Bollinger</span>
+      <span><i style="background:#ff9f43"></i>Keltner</span>
+      <span><i style="background:#ffc542"></i>Compresión</span>
+    </div>
+    <table class="det">
+      ${fila('1 · Vela anterior comprimida', si(R.antes))}
+      ${fila('2 · Liberación en esta vela', si(R.libera))}
+      ${fila('3 · Cierre fuera de Bollinger', si(R.fuera))}
+      ${fila('4 · Volumen ≥ ' + S.cfg.volMult + '×', si(R.volOk) + ' <span style="color:var(--dim)">(' + (r.volRatio?r.volRatio.toFixed(2):'—') + '×)</span>')}
+      ${r.accion ? fila('Sesión regular de NY', si(R.sesOk)) : ''}
+      ${fila('Cierre de la vela de señal', precio(r.cierre))}
+      ${r.senal ? fila('Entrada · apertura siguiente' + (r.aperturaReal ? '' : ' <span style="color:var(--squeeze)">(aún sin abrir)</span>'),
+                       precio(r.entradaRef) + (r.aperturaReal
+                         ? ` <span style="color:var(--dim)">(${r.deslizamiento >= 0 ? '+' : ''}${r.deslizamiento.toFixed(2)} %)</span>`
+                         : '')) : ''}
+      ${fila('Bollinger superior', precio(r.bbU))}
+      ${fila('Bollinger inferior', precio(r.bbL))}
+      ${fila('Keltner superior', precio(r.kcU))}
+      ${fila('Keltner inferior', precio(r.kcL))}
+      ${fila('ATR (' + S.cfg.atrLen + ')', precio(r.atrVal))}
+      ${fila('Ancho de Bollinger', r.anchoBB!=null?r.anchoBB.toFixed(2)+' %':'—')}
+      ${r.senal ? fila('Referencia de stop (1.5·ATR)', precio(r.stopRef)) : ''}
+      ${r.senal ? fila('Referencia de objetivo (3·ATR)', precio(r.objetivoRef)) : ''}
+    </table>
+    ${botonSeguir(r)}
+    <a class="tvlink" target="_blank" rel="noopener"
+       href="https://www.tradingview.com/chart/?symbol=BYBIT:${r.symbol}.P&interval=${S.cfg.tf}">
+       Abrir en TradingView →</a>
+    <p class="disc">Esta indicación es una invitación a revisar el gráfico, no una orden de compra o venta.
+    La app no accede a su cuenta ni ejecuta operaciones. Opere bajo su propio criterio y riesgo.</p>`;
+
+  $('modal').className = 'on';
+  requestAnimationFrame(()=>dibujar(r));
+}
+function cerrarModal(){ $('modal').className = ''; }
+
+// Botón de seguimiento: solo tiene sentido sobre una señal viva y sin posición abierta
+function botonSeguir(r){
+  if (S.posiciones.some(p => p.abierta && p.symbol === r.symbol))
+    return `<button class="seguir ya" disabled>Ya la estás siguiendo — mírala en «Siguiendo»</button>`;
+  if (!r.senal)
+    return `<button class="seguir ya" disabled>Sin señal confirmada que seguir</button>`;
+  const largo = r.senal === 'COMPRA';
+  return `<button class="seguir ${largo?'':'sell'}" data-seguir="${r.symbol}">
+    Seguir esta operación · stop ${precio(r.stopRef)}</button>`;
+}
+
+function iniciarSeguimiento(sym){
+  const r = S.resultados.find(x => x.symbol === sym);
+  if (!r || !r.senal) return;
+  const p = abrirPosicion(r);
+  if (!p) return;
+  cerrarModal();
+  S.tab = 'pos';
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.dataset.tab === 'pos'));
+  pintar();
+  vigilar();          // primer precio en vivo enseguida
+  arrancarVivo();
+}
+
+// Gráfico de velas con Bollinger, Keltner y sombreado de compresión
+function dibujar(r){
+  const cv = $('cv'); if (!cv) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W*dpr; cv.height = H*dpr;
+  const x = cv.getContext('2d'); x.scale(dpr, dpr);
+
+  const N = Math.min(60, r.velas.length);
+  const ini = r.velas.length - N;
+  const cs = r.velas.slice(ini);
+  const s = r.series;
+  const bbU = s.bbU.slice(ini), bbL = s.bbL.slice(ini),
+        kcU = s.kcU.slice(ini), kcL = s.kcL.slice(ini), sq = s.sq.slice(ini);
+
+  let hi = -Infinity, lo = Infinity;
+  cs.forEach(c => { hi = Math.max(hi, c.h); lo = Math.min(lo, c.l); });
+  [bbU,bbL,kcU,kcL].forEach(a => a.forEach(v => {
+    if (v != null){ hi = Math.max(hi, v); lo = Math.min(lo, v); }
+  }));
+  const pad = (hi-lo)*0.08 || 1;
+  hi += pad; lo -= pad;
+  const P = 8, GH = H - P*2;
+  const Y = v => P + (hi - v)/(hi - lo)*GH;
+  const paso = W / N, ancho = Math.max(1.5, paso*0.6);
+
+  x.clearRect(0,0,W,H);
+
+  // sombreado de compresión
+  x.fillStyle = 'rgba(255,197,66,.13)';
+  for (let i = 0; i < N; i++) if (sq[i]) x.fillRect(i*paso, 0, paso, H);
+
+  const linea = (arr, color, gruesa) => {
+    x.strokeStyle = color; x.lineWidth = gruesa; x.beginPath();
+    let mov = false;
+    for (let i = 0; i < N; i++){
+      if (arr[i] == null) { mov = false; continue; }
+      const px = i*paso + paso/2, py = Y(arr[i]);
+      if (!mov){ x.moveTo(px,py); mov = true; } else x.lineTo(px,py);
+    }
+    x.stroke();
+  };
+  linea(kcU, 'rgba(255,159,67,.85)', 1);
+  linea(kcL, 'rgba(255,159,67,.85)', 1);
+  linea(bbU, 'rgba(77,141,255,.95)', 1.6);
+  linea(bbL, 'rgba(77,141,255,.95)', 1.6);
+
+  // velas
+  for (let i = 0; i < N; i++){
+    const c = cs[i], cx = i*paso + paso/2;
+    const sube = c.c >= c.o;
+    const col = sube ? '#00d68f' : '#ff4d6a';
+    x.strokeStyle = col; x.fillStyle = col; x.lineWidth = 1;
+    x.beginPath(); x.moveTo(cx, Y(c.h)); x.lineTo(cx, Y(c.l)); x.stroke();
+    const y1 = Y(Math.max(c.o,c.c)), y2 = Y(Math.min(c.o,c.c));
+    x.fillRect(cx - ancho/2, y1, ancho, Math.max(1, y2-y1));
+  }
+
+  // marca de la señal en la última vela
+  if (r.senal){
+    const cx = (N-1)*paso + paso/2, c = cs[N-1];
+    const arriba = r.senal === 'COMPRA';
+    const y = arriba ? Y(c.l) + 12 : Y(c.h) - 12;
+    x.fillStyle = arriba ? '#00d68f' : '#ff4d6a';
+    x.beginPath();
+    if (arriba){ x.moveTo(cx, y-9); x.lineTo(cx-6, y); x.lineTo(cx+6, y); }
+    else       { x.moveTo(cx, y+9); x.lineTo(cx-6, y); x.lineTo(cx+6, y); }
+    x.closePath(); x.fill();
+    x.font = '700 10px sans-serif'; x.textAlign = 'right';
+    x.fillText(r.senal, cx - 9, arriba ? y : y + 4);
+  }
+}
+
+/* ---------- 12. EVENTOS ---------- */
+
+$('btnScan').onclick = () => { formularioACfg(); escanear(); };
+$('btnCfg').onclick = () => {
+  const on = $('cfg').classList.toggle('on');
+  $('btnCfg').classList.toggle('on', on);
+};
+$('btnSound').onclick = () => {
+  S.cfg.sound = !S.cfg.sound;
+  $('sound').checked = S.cfg.sound;
+  $('btnSound').classList.toggle('on', S.cfg.sound);
+  $('btnSound').textContent = S.cfg.sound ? '🔔' : '🔕';
+  if (S.cfg.sound) sonar(true);
+  guardar();
+};
+$('btnReset').onclick = () => {
+  ['tf','bbLen','bbMult','kcLen','atrLen','kcMult','volLen','volMult']
+    .forEach(k => { S.cfg[k] = POR_DEFECTO[k]; });
+  cfgAlFormulario(); guardar(); actualizarSubtitulo();
+};
+$('btnClear').onclick = () => {
+  if (!confirm('¿Borrar todo el historial de señales?')) return;
+  S.historial = []; S.vistas.clear(); guardar(); pintar();
+};
+$('btnClearDiario').onclick = () => {
+  if (!confirm('¿Borrar la bitácora y sus estadísticas? Las posiciones abiertas no se tocan.')) return;
+  S.bitacora = []; guardar(); pintar();
+};
+$('vivo').addEventListener('change', () => { formularioACfg(); arrancarVivo(); });
+$('btnTest').onclick = async () => {
+  formularioACfg();
+  $('testOut').textContent = 'Probando…';
+  try{
+    const t0 = performance.now();
+    const res = await api('/v5/market/tickers?category=linear&symbol=BTCUSDT');
+    const ms = Math.round(performance.now() - t0);
+    $('testOut').innerHTML =
+      `<span style="color:var(--buy)">✓ Conectado en ${ms} ms</span> — BTCUSDT a ${precio(+res.list[0].lastPrice)}`;
+  }catch(e){
+    $('testOut').innerHTML =
+      `<span style="color:var(--sell)">✗ ${e.message}</span><br>
+       Si dice “Failed to fetch”, su red o su región bloquea ese servidor: pruebe otro de la lista.`;
+  }
+};
+
+document.querySelectorAll('.tab').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
+  b.classList.add('on');
+  S.tab = b.dataset.tab;
+  pintar();
+});
+
+$('out').addEventListener('click', e => {
+  const cerrar = e.target.closest('[data-cerrar]');
+  if (cerrar){
+    const p = S.posiciones.find(x => x.id === cerrar.dataset.cerrar);
+    if (p && confirm(`¿Cerrar ${p.symbol} al precio actual (${precio(p.ultimo)})?`)){
+      cerrarPos(p, p.ultimo, 'MANUAL');
+      pintar();
+    }
+    return;
+  }
+  const ver = e.target.closest('[data-ver]');
+  if (ver){ abrirDetalle(ver.dataset.ver); return; }
+  const c = e.target.closest('.card');
+  if (c) abrirDetalle(c.dataset.sym);
+});
+
+$('sheet').addEventListener('click', e => {
+  const b = e.target.closest('[data-seguir]');
+  if (b) iniciarSeguimiento(b.dataset.seguir);
+});
+$('modal').addEventListener('click', e => { if (e.target.id === 'modal') cerrarModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') cerrarModal(); });
+
+CAMPOS.forEach(k => { const el = $(k); if (el) el.addEventListener('change', formularioACfg); });
+
+$('notif').addEventListener('change', async e => {
+  if (e.target.checked && 'Notification' in window){
+    const p = await Notification.requestPermission();
+    if (p !== 'granted'){ e.target.checked = false; alert('El navegador no concedió permiso para notificaciones.'); }
+  }
+  formularioACfg();
+});
+
+$('wake').addEventListener('change', async e => {
+  try{
+    if (e.target.checked && 'wakeLock' in navigator){
+      S.wakeLock = await navigator.wakeLock.request('screen');
+    } else if (S.wakeLock){ S.wakeLock.release(); S.wakeLock = null; }
+  }catch(err){ e.target.checked = false; }
+  formularioACfg();
+});
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'visible' && S.cfg.wake && 'wakeLock' in navigator){
+    try{ S.wakeLock = await navigator.wakeLock.request('screen'); }catch(e){}
+  }
+});
+
+/* ---------- 13. ARRANQUE ---------- */
+
+cargar();
+cfgAlFormulario();
+actualizarSubtitulo();
+$('btnSound').classList.toggle('on', S.cfg.sound);
+$('btnSound').textContent = S.cfg.sound ? '🔔' : '🔕';
+pintar();
+programarAuto();
+arrancarVivo();
+if (S.posiciones.some(p => p.abierta)) vigilar();   // refrescar lo que quedó abierto
+escanear();
+
+/* ---------- 14. APP INSTALABLE ---------- */
+
+const VERSION = '1.3.0';
+
+// Registro del service worker. Solo funciona sobre https (o localhost al probar):
+// desde un archivo suelto el navegador no lo permite, y no es un error.
+const puedeSW = 'serviceWorker' in navigator &&
+  (location.protocol === 'https:' || ['localhost','127.0.0.1'].includes(location.hostname));
+
+if (puedeSW){
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    // Si aparece una versión nueva, se avisa en vez de cambiarla por sorpresa
+    reg.addEventListener('updatefound', () => {
+      const nuevo = reg.installing;
+      if (!nuevo) return;
+      nuevo.addEventListener('statechange', () => {
+        if (nuevo.state === 'installed' && navigator.serviceWorker.controller) avisoActualizar(reg);
+      });
+    });
+    setInterval(() => reg.update().catch(()=>{}), 3600000);   // busca cambios cada hora
+  }).catch(()=>{});
+
+  let recargando = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (recargando) return;
+    recargando = true;
+    location.reload();
+  });
+  window.__recargar = () => { recargando = false; };
+}
+
+function avisoActualizar(reg){
+  $('actualizar').className = 'on';
+  $('actualizar').innerHTML =
+    `<div class="aviso">
+       <div class="ic">⬆️</div>
+       <div class="tx"><b>Hay una versión nueva</b><span>Se aplica al recargar. No pierdes posiciones ni bitácora.</span></div>
+       <button id="btnAct">Actualizar</button>
+       <button class="no" onclick="document.getElementById('actualizar').className=''">×</button>
+     </div>`;
+  $('btnAct').onclick = () => {
+    if (reg.waiting) reg.waiting.postMessage('actualizar');
+    else location.reload();
+  };
+}
+
+// Aviso de instalación: Chrome lo ofrece cuando la app cumple los requisitos
+let promptInstalar = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  promptInstalar = e;
+  let oculto = false;
+  try{ oculto = localStorage.getItem('at.noInstalar') === '1'; }catch(err){}
+  if (oculto) return;
+  $('instalar').className = 'on';
+  $('instalar').innerHTML =
+    `<div class="aviso">
+       <div class="ic">📲</div>
+       <div class="tx"><b>Instálala en tu teléfono</b><span>Queda con su ícono en la pantalla de inicio y abre a pantalla completa.</span></div>
+       <button id="btnInst">Instalar</button>
+       <button class="no" id="btnNoInst">×</button>
+     </div>`;
+  $('btnInst').onclick = async () => {
+    $('instalar').className = '';
+    promptInstalar.prompt();
+    await promptInstalar.userChoice;
+    promptInstalar = null;
+  };
+  $('btnNoInst').onclick = () => {
+    $('instalar').className = '';
+    try{ localStorage.setItem('at.noInstalar', '1'); }catch(err){}
+  };
+});
+
+window.addEventListener('appinstalled', () => { $('instalar').className = ''; });
+
+// La versión se muestra en Configuración → Conexión, para saber qué se está usando
+document.addEventListener('DOMContentLoaded', () => {});
+(function mostrarVersion(){
+  const modo = window.matchMedia('(display-mode: standalone)').matches ||
+               navigator.standalone ? 'instalada' : 'en navegador';
+  const el = document.createElement('div');
+  el.className = 'hint';
+  el.style.textAlign = 'center';
+  el.innerHTML = `Alerta Trading v${VERSION} · ${modo}` +
+    (puedeSW ? '' : ' · <span style="color:var(--squeeze)">sin modo offline: ábrela desde su dirección web, no como archivo</span>');
+  const caja = $('testOut');
+  if (caja && caja.parentElement) caja.parentElement.appendChild(el);
+})();
+</script>
+</body>
+</html>
