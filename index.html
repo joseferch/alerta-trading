@@ -667,7 +667,7 @@ const S = {
   universo: [], resultados: [], historial: [],
   posiciones: [], bitacora: [],
   tab:'sig', escaneando:false, timer:null, tick:null, vivoTimer:null, wakeLock:null,
-  vistas:new Set(), interactuado:false
+  vistas:new Set(), interactuado:false, ultimoEscaneo:null, ocultoDesde:null
 };
 ['pointerdown','keydown'].forEach(ev =>
   addEventListener(ev, () => { S.interactuado = true; }, { once:true, passive:true }));
@@ -815,6 +815,7 @@ async function escanear(){
       (b.volRatio||0) - (a.volRatio||0));
 
     registrarSenales(S.resultados.filter(r => r.senal));
+    S.ultimoEscaneo = Date.now();
     estado(`Listo ${hora(Date.now())}` + (errores ? ` · ${errores} sin datos` : ''), 'live');
     pintar();
   }catch(e){
@@ -1539,6 +1540,29 @@ document.addEventListener('visibilitychange', async () => {
   }
 });
 
+/* Android congela la app en segundo plano: los temporizadores se detienen y al
+   volver pueden estar atrasados varias velas. En vez de esperar al siguiente
+   cierre, se pone al día en cuanto vuelve a estar en pantalla. */
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible'){ S.ocultoDesde = Date.now(); return; }
+  const fuera = S.ocultoDesde ? Date.now() - S.ocultoDesde : 0;
+  S.ocultoDesde = null;
+  if (fuera < 20000) return;                 // un vistazo corto no necesita nada
+
+  // Primero el precio: puede haber una salida pendiente de avisar
+  if (S.posiciones.some(p => p.abierta)) vigilar();
+
+  programarAuto();                           // resincronizar con el reloj del mercado
+
+  // Escanear solo si de verdad cerró una vela desde el último escaneo
+  const dur = MS[S.cfg.tf] || 9e5;
+  const ultimoCierre = Math.floor(Date.now() / dur) * dur;
+  if (!S.ultimoEscaneo || S.ultimoEscaneo < ultimoCierre){
+    estado('Poniéndose al día…');
+    escanear();
+  }
+});
+
 /* ---------- 13. ARRANQUE ---------- */
 
 cargar();
@@ -1554,7 +1578,7 @@ escanear();
 
 /* ---------- 14. APP INSTALABLE ---------- */
 
-const VERSION = '1.3.0';
+const VERSION = '1.3.1';
 
 // Registro del service worker. Solo funciona sobre https (o localhost al probar):
 // desde un archivo suelto el navegador no lo permite, y no es un error.
