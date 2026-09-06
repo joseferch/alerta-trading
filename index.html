@@ -193,6 +193,14 @@ table.det td:last-child{text-align:right;font-family:var(--mono);font-weight:600
 .disc{font-size:10.5px;color:var(--dim2);text-align:center;margin-top:14px;line-height:1.5}
 
 /* ---------- historial ---------- */
+/* ---------- favoritos ---------- */
+.fav{
+  background:transparent;color:var(--dim2);font-size:17px;line-height:1;
+  padding:3px 5px;flex:0 0 auto;margin-left:-4px;
+}
+.fav.on{color:var(--squeeze)}
+.fav:active{transform:scale(.85)}
+
 /* ---------- confirmación flotante ---------- */
 #toast{
   position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(16px);
@@ -434,6 +442,7 @@ table.det td:last-child{text-align:right;font-family:var(--mono);font-weight:600
 
 <div class="tabs">
   <button class="tab on" data-tab="sig">Señales <span class="n" id="nSig">0</span></button>
+  <button class="tab" data-tab="fav">★ Favoritos <span class="n" id="nFav">0</span></button>
   <button class="tab" data-tab="pos">Siguiendo <span class="n" id="nPos">0</span></button>
   <button class="tab" data-tab="diario">Bitácora <span class="n" id="nDia">0</span></button>
   <button class="tab" data-tab="sq">Comprimidos <span class="n" id="nSq">0</span></button>
@@ -700,7 +709,7 @@ const PRINCIPALES = ['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','BNBUSDT','DOGEUSDT
 const S = {
   cfg: { ...POR_DEFECTO },
   universo: [], resultados: [], historial: [],
-  posiciones: [], bitacora: [],
+  posiciones: [], bitacora: [], favoritos: [],
   tab:'sig', escaneando:false, timer:null, tick:null, vivoTimer:null, wakeLock:null,
   vistas:new Set(), interactuado:false, ultimoEscaneo:null, ocultoDesde:null
 };
@@ -713,6 +722,7 @@ function guardar(){
     localStorage.setItem('at.hist', JSON.stringify(S.historial.slice(0,150)));
     localStorage.setItem('at.pos', JSON.stringify(S.posiciones));
     localStorage.setItem('at.diario', JSON.stringify(S.bitacora.slice(0,300)));
+    localStorage.setItem('at.favs', JSON.stringify(S.favoritos));
   }catch(e){}
 }
 function cargar(){
@@ -725,6 +735,8 @@ function cargar(){
     if (p) S.posiciones = JSON.parse(p) || [];
     const d = localStorage.getItem('at.diario');
     if (d) S.bitacora = JSON.parse(d) || [];
+    const f = localStorage.getItem('at.favs');
+    if (f) S.favoritos = JSON.parse(f) || [];
     // no volver a avisar de señales ya registradas tras recargar
     S.historial.forEach(x => S.vistas.add(x.symbol + '|' + x.hora + '|' + x.senal));
   }catch(e){}
@@ -753,6 +765,31 @@ function formularioACfg(){
   programarAuto();
 }
 
+/* ---------- Favoritos ---------- */
+
+const esFavorito = sym => S.favoritos.includes(sym);
+
+function alternarFavorito(sym){
+  const i = S.favoritos.indexOf(sym);
+  if (i >= 0){
+    S.favoritos.splice(i, 1);
+    aviso(`${sym} quitado de favoritos`);
+  } else {
+    S.favoritos.push(sym);
+    S.favoritos.sort();
+    aviso(`${sym} añadido a favoritos · siempre se escanea`);
+  }
+  guardar();
+  pintar();
+  // Si el detalle está abierto sobre ese activo, refrescar su estrella
+  if ($('modal').className === 'on' && $('sheet').dataset.sym === sym) abrirDetalle(sym);
+}
+
+const estrella = sym =>
+  `<button class="fav ${esFavorito(sym) ? 'on' : ''}" data-fav="${sym}"
+     title="${esFavorito(sym) ? 'Quitar de favoritos' : 'Añadir a favoritos'}"
+     aria-label="favorito">${esFavorito(sym) ? '★' : '☆'}</button>`;
+
 let toastTimer = null;
 function aviso(txt, error){
   const t = $('toast');
@@ -769,7 +806,8 @@ function aviso(txt, error){
 function exportarDatos(){
   const datos = {
     app: 'alerta-trading', version: VERSION, exportado: new Date().toISOString(),
-    cfg: S.cfg, posiciones: S.posiciones, bitacora: S.bitacora, historial: S.historial
+    cfg: S.cfg, posiciones: S.posiciones, bitacora: S.bitacora,
+    historial: S.historial, favoritos: S.favoritos
   };
   const blob = new Blob([JSON.stringify(datos, null, 2)], { type:'application/json' });
   const url = URL.createObjectURL(blob);
@@ -790,7 +828,13 @@ function importarDatos(texto){
   catch(e){ aviso('El archivo no es válido', true); return; }
   if (!d || d.app !== 'alerta-trading'){ aviso('Ese archivo no es de esta app', true); return; }
 
-  let nPos = 0, nBit = 0, nHist = 0;
+  let nPos = 0, nBit = 0, nHist = 0, nFav = 0;
+
+  for (const sym of (d.favoritos || [])){
+    if (typeof sym !== 'string' || S.favoritos.includes(sym)) continue;
+    S.favoritos.push(sym); nFav++;
+  }
+  S.favoritos.sort();
 
   const idsPos = new Set(S.posiciones.map(p => p.id));
   for (const p of (d.posiciones || [])){
@@ -818,9 +862,9 @@ function importarDatos(texto){
 
   guardar();
   pintar();
-  aviso(nPos + nBit + nHist === 0
+  aviso(nPos + nBit + nHist + nFav === 0
     ? 'Ya tenías todo: nada nuevo que añadir'
-    : `Añadido: ${nBit} operaciones, ${nPos} posiciones, ${nHist} señales`);
+    : `Añadido: ${nBit} operaciones, ${nPos} posiciones, ${nHist} señales, ${nFav} favoritos`);
 }
 
 function actualizarSubtitulo(){
@@ -865,19 +909,33 @@ function estado(txt, clase){
 
 async function resolverUniverso(){
   const c = S.cfg;
-  if (c.uni === 'manual'){
-    const l = c.manual.split(/[,\s]+/).map(s=>s.trim().toUpperCase()).filter(Boolean);
-    return l.map(symbol => ({ symbol, turnover:0, cambio:0 }));
-  }
-  if (c.uni === 'original') return ORIGINALES.map(symbol => ({ symbol, turnover:0, cambio:0 }));
+  let lista, todos = null;
 
-  let lista = await cargarUniverso();     // datos reales del mercado
-  if (c.uni === 'cripto'){
-    const set = new Set(PRINCIPALES);
-    return lista.filter(t => set.has(t.symbol));
+  if (c.uni === 'manual'){
+    lista = c.manual.split(/[,\s]+/).map(s=>s.trim().toUpperCase()).filter(Boolean)
+      .map(symbol => ({ symbol, turnover:0, cambio:0 }));
+  } else if (c.uni === 'original'){
+    lista = ORIGINALES.map(symbol => ({ symbol, turnover:0, cambio:0 }));
+  } else {
+    todos = await cargarUniverso();       // datos reales del mercado
+    if (c.uni === 'cripto'){
+      const set = new Set(PRINCIPALES);
+      lista = todos.filter(t => set.has(t.symbol));
+    } else {
+      lista = todos.filter(t => t.turnover >= c.minTurn);
+      if (c.uni === 'top') lista = lista.slice(0, c.topN);
+    }
   }
-  lista = lista.filter(t => t.turnover >= c.minTurn);
-  if (c.uni === 'top') lista = lista.slice(0, c.topN);
+
+  // Los favoritos entran SIEMPRE, aunque el filtro de volumen o el modo elegido
+  // los dejaría fuera: si los marcaste, es porque quieres verlos.
+  const dentro = new Set(lista.map(t => t.symbol));
+  for (const sym of S.favoritos){
+    if (dentro.has(sym)) continue;
+    const info = todos && todos.find(t => t.symbol === sym);
+    lista.push(info || { symbol: sym, turnover: 0, cambio: 0 });
+    dentro.add(sym);
+  }
   return lista;
 }
 
@@ -1207,6 +1265,7 @@ function tarjeta(r){
   const R = r.reglas;
   return `<div class="card ${cl}" data-sym="${r.symbol}">
     <div class="crow">
+      ${estrella(r.symbol)}
       <span class="sym">${r.symbol}${r.accion?'<span class="tagfi">TradFi</span>':''}</span>
       ${insignia}<span class="spacer"></span>
       <span class="price">${precio(r.cierre)}</span>
@@ -1315,14 +1374,46 @@ function pintar(){
   const senales = S.resultados.filter(r => r.senal);
   const comprimidos = S.resultados.filter(r => !r.senal && r.comprimido);
   const abiertas = S.posiciones.filter(p => p.abierta);
+  // Los favoritos se muestran siempre, tengan señal o no: son tu lista de vigilancia
+  const favoritos = S.resultados.filter(r => esFavorito(r.symbol));
   $('nSig').textContent = senales.length;
   $('nSq').textContent = comprimidos.length;
   $('nAll').textContent = S.resultados.length;
   $('nHist').textContent = S.historial.length;
   $('nPos').textContent = abiertas.length;
   $('nDia').textContent = S.bitacora.length;
+  $('nFav').textContent = S.favoritos.length;
 
   const out = $('out');
+
+  if (S.tab === 'fav'){
+    if (!S.favoritos.length){
+      out.innerHTML = `<div class="empty"><div class="ico">☆</div>
+        <p><b>Sin favoritos todavía</b></p>
+        <p>Toca la estrella de cualquier activo para añadirlo.
+        Tus favoritos se escanean <b>siempre</b>, aunque el filtro de volumen
+        o el universo elegido los dejaran fuera.</p></div>`;
+      return;
+    }
+    if (!favoritos.length){
+      out.innerHTML = `<div class="empty"><div class="ico">☆</div>
+        <p><b>${S.favoritos.length} favorito(s) sin datos aún</b></p>
+        <p>Pulsa <b>Escanear</b> para traerlos.</p></div>`;
+      return;
+    }
+    const orden = { COMPRA: 0, VENTA: 0 };
+    out.innerHTML = favoritos
+      .sort((a, b) => (b.senal ? 2 : 0) - (a.senal ? 2 : 0) ||
+                      (b.comprimido ? 1 : 0) - (a.comprimido ? 1 : 0) ||
+                      a.symbol.localeCompare(b.symbol))
+      .map(tarjeta).join('');
+    const faltan = S.favoritos.filter(s => !favoritos.some(r => r.symbol === s));
+    if (faltan.length){
+      out.innerHTML += `<div class="hint" style="text-align:center">
+        Sin datos en el último escaneo: ${faltan.join(', ')}</div>`;
+    }
+    return;
+  }
 
   if (S.tab === 'pos'){
     out.innerHTML = abiertas.length
@@ -1397,8 +1488,10 @@ function abrirDetalle(sym){
   const fila = (a,b) => `<tr><td>${a}</td><td>${b}</td></tr>`;
   const si = b => b ? '<span style="color:var(--buy)">SÍ</span>' : '<span style="color:var(--sell)">NO</span>';
 
+  $('sheet').dataset.sym = r.symbol;
   $('sheet').innerHTML = `
     <div class="shead">
+      ${estrella(r.symbol)}
       <div style="flex:1">
         <h2 style="font-size:18px">${r.symbol}${r.accion?'<span class="tagfi">TradFi</span>':''}</h2>
         <div style="font-size:11.5px;color:var(--dim)">Vela de ${S.cfg.tf==='D'?'1 día':S.cfg.tf+' min'} cerrada a las ${hora(r.hora)}</div>
@@ -1600,6 +1693,8 @@ document.querySelectorAll('.tab').forEach(b => b.onclick = () => {
 });
 
 $('out').addEventListener('click', e => {
+  const fav = e.target.closest('[data-fav]');
+  if (fav){ e.stopPropagation(); alternarFavorito(fav.dataset.fav); return; }
   const cerrar = e.target.closest('[data-cerrar]');
   if (cerrar){
     const p = S.posiciones.find(x => x.id === cerrar.dataset.cerrar);
@@ -1616,6 +1711,8 @@ $('out').addEventListener('click', e => {
 });
 
 $('sheet').addEventListener('click', e => {
+  const fav = e.target.closest('[data-fav]');
+  if (fav){ alternarFavorito(fav.dataset.fav); return; }
   const b = e.target.closest('[data-seguir]');
   if (b) iniciarSeguimiento(b.dataset.seguir);
 });
@@ -1709,7 +1806,7 @@ escanear();
 
 /* ---------- 14. APP INSTALABLE ---------- */
 
-const VERSION = '1.4.0';
+const VERSION = '1.5.0';
 
 // Registro del service worker. Solo funciona sobre https (o localhost al probar):
 // desde un archivo suelto el navegador no lo permite, y no es un error.
