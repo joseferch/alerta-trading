@@ -367,6 +367,22 @@ table.det td:last-child{text-align:right;font-family:var(--mono);font-weight:600
       <div class="fld"><label>Volumen — SMA</label><input type="number" id="volLen" value="20" min="2"></div>
       <div class="fld"><label>Volumen — múltiplo mínimo</label><input type="number" id="volMult" value="1.5" step="0.1"></div>
     </div>
+    <label class="switch" style="margin-top:6px">
+      <input type="checkbox" id="usarTendencia">
+      <span>Quinta regla: filtro de tendencia</span>
+    </label>
+    <div class="grid">
+      <div class="fld"><label>EMA de tendencia</label><input type="number" id="emaTendLen" value="200" min="10" max="400"></div>
+    </div>
+    <div class="hint">
+      Con esto encendido, solo acepta <b style="color:var(--buy)">COMPRA</b> si el cierre está
+      <b>por encima</b> de la EMA, y <b style="color:var(--sell)">VENTA</b> solo si está por debajo.
+      Descarta la ruptura al alza en plena caída, que es la ruptura falsa más común.<br><br>
+      Viene apagado a propósito. Enciéndelo, deja correr dos semanas y compara en la bitácora
+      contra lo que tenías: así el filtro se gana el puesto con tus datos, no con una teoría.
+      Ojo, va a reducir bastante el número de señales.
+    </div>
+
     <div class="btnrow">
       <button class="btn2 pri" id="btnAplicar">Aplicar y escanear</button>
       <button class="btn2" id="btnReset">Restaurar reglas originales</button>
@@ -544,6 +560,8 @@ function analizar(cs, C, opts){
   const dev     = stdev(close, C.bbLen);
   const kcBasis = ema(close, C.kcLen);
   const atrArr  = atr(cs, C.atrLen);
+  // EMA de tendencia — quinta regla opcional, solo se calcula si está encendida
+  const emaTend = C.usarTendencia ? ema(close, C.emaTendLen) : null;
 
   // Para TradFi el promedio de volumen usa solo velas de sesión regular:
   // así el bajo volumen nocturno no cumple el múltiplo artificialmente.
@@ -574,8 +592,20 @@ function analizar(cs, C, opts){
   const volOk  = ratio != null && isFinite(ratio) && ratio >= C.volMult; // regla 4
   const sesOk  = opts.soloSesion ? !!c.rth : true;
 
+  // Quinta regla: la ruptura tiene que ir a favor de la tendencia.
+  // Si el filtro está apagado, todo pasa. Si está encendido pero aún no hay
+  // suficientes velas para la EMA, se rechaza en vez de dejar pasar a ciegas.
+  const emaT = emaTend ? emaTend[i] : null;
+  const tendConocida = !C.usarTendencia || (emaT != null && isFinite(emaT));
+  const tendAlza = !C.usarTendencia || (tendConocida && c.c > emaT);
+  const tendBaja = !C.usarTendencia || (tendConocida && c.c < emaT);
+
   let senal = null;
-  if (sesOk && libera && volOk) senal = arriba ? 'COMPRA' : abajo ? 'VENTA' : null;
+  if (sesOk && libera && volOk){
+    if (arriba && tendAlza) senal = 'COMPRA';
+    else if (abajo && tendBaja) senal = 'VENTA';
+  }
+  const tendOk = arriba ? tendAlza : abajo ? tendBaja : tendConocida;
 
   let barras = 0; for (let j = i; j >= 0 && sq[j] === true; j--) barras++;
 
@@ -587,7 +617,11 @@ function analizar(cs, C, opts){
 
   return {
     ok:true, senal,
-    reglas:{ antes, libera, fuera: arriba||abajo, volOk, sesOk },
+    reglas:{ antes, libera, fuera: arriba||abajo, volOk, sesOk, tendOk },
+    usaTendencia: !!C.usarTendencia,
+    emaTend: emaT,
+    tendencia: !C.usarTendencia || !tendConocida ? null : (c.c > emaT ? 'alcista' : 'bajista'),
+    distEma: (C.usarTendencia && tendConocida && emaT > 0) ? (c.c - emaT)/emaT*100 : null,
     cierre:c.c, hora:c.t, volRatio:ratio,
     entradaRef: entrada, aperturaReal: hayApertura,
     deslizamiento: c.c > 0 ? (entrada - c.c)/c.c*100 : 0,
@@ -597,7 +631,7 @@ function analizar(cs, C, opts){
     // Los niveles cuelgan del precio de entrada, con el ATR del momento de la señal
     stopRef:    senal==='COMPRA' ? entrada - C.stopMult*a : senal==='VENTA' ? entrada + C.stopMult*a : null,
     objetivoRef:senal==='COMPRA' ? entrada + C.objMult*a  : senal==='VENTA' ? entrada - C.objMult*a  : null,
-    velas: cs, series:{ bbU, bbL, kcU, kcL, sq }
+    velas: cs, series:{ bbU, bbL, kcU, kcL, sq, emaTend }
   };
 }
 
@@ -697,6 +731,7 @@ async function enTanda(items, limite, fn, onProg){
 const POR_DEFECTO = {
   host:'https://api.bybit.com', uni:'todos', topN:60, minTurn:5000000, manual:'',
   tf:'15', bbLen:20, bbMult:2, kcLen:20, atrLen:20, kcMult:2, volLen:20, volMult:1.5,
+  usarTendencia:false, emaTendLen:200,
   stopMult:1.5, objMult:3, trailMult:2, usarObjetivo:true, usarTrailing:true,
   vivo:true, autoScan:true, notif:false, sound:true, wake:false, rth:true
 };
@@ -744,7 +779,8 @@ function cargar(){
 
 const $ = id => document.getElementById(id);
 const CAMPOS = ['host','uni','topN','minTurn','manual','tf','bbLen','bbMult','kcLen','atrLen',
-  'kcMult','volLen','volMult','stopMult','objMult','trailMult','usarObjetivo','usarTrailing',
+  'kcMult','volLen','volMult','usarTendencia','emaTendLen',
+  'stopMult','objMult','trailMult','usarObjetivo','usarTrailing',
   'vivo','autoScan','notif','sound','wake','rth'];
 
 function cfgAlFormulario(){
@@ -954,8 +990,12 @@ async function escanear(){
 
     const c = S.cfg;
     const necesarias = Math.max(c.bbLen, c.kcLen, c.atrLen, c.volLen);
-    // Con filtro de sesión hacen falta muchas más velas para juntar 20 de sesión regular
-    const limite = Math.min(1000, Math.max(necesarias * (c.rth ? 8 : 3), 100));
+    // Con filtro de sesión hacen falta muchas más velas para juntar 20 de sesión regular,
+    // y con filtro de tendencia hay que traer al menos el largo de la EMA.
+    const limite = Math.min(1000, Math.max(
+      necesarias * (c.rth ? 8 : 3),
+      c.usarTendencia ? c.emaTendLen + 30 : 0,
+      100));
 
     estado(`Analizando ${uni.length} activos…`);
     const barra = $('prog').firstElementChild;
@@ -1281,6 +1321,7 @@ function tarjeta(r){
       <div class="rule ${R.libera?'ok':'no'}">2 Liberación</div>
       <div class="rule ${R.fuera?'ok':'no'}">3 Fuera BB</div>
       <div class="rule ${R.volOk?'ok':'no'}">4 Volumen</div>
+      ${r.usaTendencia?`<div class="rule ${R.tendOk?'ok':'no'}">5 Tendencia</div>`:''}
       ${r.accion?`<div class="rule ${R.sesOk?'ok':'no'}">Sesión</div>`:''}
     </div>
   </div>`;
@@ -1509,12 +1550,18 @@ function abrirDetalle(sym){
       <span><i style="background:#4d8dff"></i>Bollinger</span>
       <span><i style="background:#ff9f43"></i>Keltner</span>
       <span><i style="background:#ffc542"></i>Compresión</span>
+      ${r.usaTendencia?'<span><i style="background:#c8a0ff"></i>EMA tendencia</span>':''}
     </div>
     <table class="det">
       ${fila('1 · Vela anterior comprimida', si(R.antes))}
       ${fila('2 · Liberación en esta vela', si(R.libera))}
       ${fila('3 · Cierre fuera de Bollinger', si(R.fuera))}
       ${fila('4 · Volumen ≥ ' + S.cfg.volMult + '×', si(R.volOk) + ' <span style="color:var(--dim)">(' + (r.volRatio?r.volRatio.toFixed(2):'—') + '×)</span>')}
+      ${r.usaTendencia ? fila('5 · A favor de la tendencia', si(R.tendOk) +
+          (r.tendencia ? ` <span style="color:var(--dim)">(${r.tendencia})</span>` : ' <span style="color:var(--squeeze)">(sin datos)</span>')) : ''}
+      ${r.usaTendencia && r.emaTend != null ? fila(`EMA ${S.cfg.emaTendLen}`,
+          precio(r.emaTend) + (r.distEma != null
+            ? ` <span style="color:var(--dim)">(${r.distEma >= 0 ? '+' : ''}${r.distEma.toFixed(2)} %)</span>` : '')) : ''}
       ${r.accion ? fila('Sesión regular de NY', si(R.sesOk)) : ''}
       ${fila('Cierre de la vela de señal', precio(r.cierre))}
       ${r.senal ? fila('Entrada · apertura siguiente' + (r.aperturaReal ? '' : ' <span style="color:var(--squeeze)">(aún sin abrir)</span>'),
@@ -1580,6 +1627,7 @@ function dibujar(r){
   const s = r.series;
   const bbU = s.bbU.slice(ini), bbL = s.bbL.slice(ini),
         kcU = s.kcU.slice(ini), kcL = s.kcL.slice(ini), sq = s.sq.slice(ini);
+  const emaT = s.emaTend ? s.emaTend.slice(ini) : null;
 
   let hi = -Infinity, lo = Infinity;
   cs.forEach(c => { hi = Math.max(hi, c.h); lo = Math.min(lo, c.l); });
@@ -1610,6 +1658,11 @@ function dibujar(r){
   };
   linea(kcU, 'rgba(255,159,67,.85)', 1);
   linea(kcL, 'rgba(255,159,67,.85)', 1);
+  if (emaT){                       // EMA de tendencia, cuando el filtro está encendido
+    x.setLineDash([4, 3]);
+    linea(emaT, 'rgba(200,160,255,.9)', 1.4);
+    x.setLineDash([]);
+  }
   linea(bbU, 'rgba(77,141,255,.95)', 1.6);
   linea(bbL, 'rgba(77,141,255,.95)', 1.6);
 
@@ -1656,7 +1709,7 @@ $('btnSound').onclick = () => {
   aviso(S.cfg.sound ? 'Sonido activado' : 'Sonido silenciado');
 };
 $('btnReset').onclick = () => {
-  ['tf','bbLen','bbMult','kcLen','atrLen','kcMult','volLen','volMult']
+  ['tf','bbLen','bbMult','kcLen','atrLen','kcMult','volLen','volMult','usarTendencia','emaTendLen']
     .forEach(k => { S.cfg[k] = POR_DEFECTO[k]; });
   cfgAlFormulario(); guardar(); actualizarSubtitulo();
 };
@@ -1806,7 +1859,7 @@ escanear();
 
 /* ---------- 14. APP INSTALABLE ---------- */
 
-const VERSION = '1.5.0';
+const VERSION = '1.6.0';
 
 // Registro del service worker. Solo funciona sobre https (o localhost al probar):
 // desde un archivo suelto el navegador no lo permite, y no es un error.
