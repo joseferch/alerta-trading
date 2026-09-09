@@ -606,6 +606,10 @@ function analizar(cs, C, opts){
     else if (abajo && tendBaja) senal = 'VENTA';
   }
   const tendOk = arriba ? tendAlza : abajo ? tendBaja : tendConocida;
+  // Habría sido señal si no fuera por el filtro de tendencia: se cuenta aparte
+  // para que se vea el trabajo del filtro, que si no es invisible.
+  const bloqueadaPorTendencia = !!C.usarTendencia && sesOk && libera && volOk
+                                && (arriba || abajo) && !tendOk;
 
   let barras = 0; for (let j = i; j >= 0 && sq[j] === true; j--) barras++;
 
@@ -618,7 +622,7 @@ function analizar(cs, C, opts){
   return {
     ok:true, senal,
     reglas:{ antes, libera, fuera: arriba||abajo, volOk, sesOk, tendOk },
-    usaTendencia: !!C.usarTendencia,
+    usaTendencia: !!C.usarTendencia, bloqueadaPorTendencia,
     emaTend: emaT,
     tendencia: !C.usarTendencia || !tendConocida ? null : (c.c > emaT ? 'alcista' : 'bajista'),
     distEma: (C.usarTendencia && tendConocida && emaT > 0) ? (c.c - emaT)/emaT*100 : null,
@@ -746,7 +750,7 @@ const S = {
   universo: [], resultados: [], historial: [],
   posiciones: [], bitacora: [], favoritos: [],
   tab:'sig', escaneando:false, timer:null, tick:null, vivoTimer:null, wakeLock:null,
-  vistas:new Set(), interactuado:false, ultimoEscaneo:null, ocultoDesde:null
+  vistas:new Set(), interactuado:false, ultimoEscaneo:null, ocultoDesde:null, bloqueadas:0
 };
 ['pointerdown','keydown'].forEach(ev =>
   addEventListener(ev, () => { S.interactuado = true; }, { once:true, passive:true }));
@@ -906,7 +910,9 @@ function importarDatos(texto){
 function actualizarSubtitulo(){
   const c = S.cfg;
   $('subtitle').textContent =
-    `BB ${c.bbLen},${c.bbMult} · KC EMA${c.kcLen}±${c.kcMult}·ATR${c.atrLen} · Vol ≥${c.volMult}× · ${c.tf==='D'?'1D':c.tf+'m'}`;
+    `BB ${c.bbLen},${c.bbMult} · KC EMA${c.kcLen}±${c.kcMult}·ATR${c.atrLen} · Vol ≥${c.volMult}×`
+    + (c.usarTendencia ? ` · Tend EMA${c.emaTendLen}` : '')
+    + ` · ${c.tf==='D'?'1D':c.tf+'m'}`;
 }
 
 /* ---------- 6. FORMATO ---------- */
@@ -1019,7 +1025,10 @@ async function escanear(){
 
     registrarSenales(S.resultados.filter(r => r.senal));
     S.ultimoEscaneo = Date.now();
-    estado(`Listo ${hora(Date.now())}` + (errores ? ` · ${errores} sin datos` : ''), 'live');
+    S.bloqueadas = S.resultados.filter(r => r.bloqueadaPorTendencia).length;
+    estado(`Listo ${hora(Date.now())}`
+      + (S.bloqueadas ? ` · ${S.bloqueadas} descartada${S.bloqueadas > 1 ? 's' : ''} por tendencia` : '')
+      + (errores ? ` · ${errores} sin datos` : ''), 'live');
     pintar();
   }catch(e){
     estado('Error: ' + (e.message || e), 'err');
@@ -1299,9 +1308,11 @@ function tarjeta(r){
   const cl = r.senal === 'COMPRA' ? 'buy' : r.senal === 'VENTA' ? 'sell' : r.comprimido ? 'sq' : '';
   const insignia = r.senal
     ? `<span class="badge ${r.senal==='COMPRA'?'buy':'sell'}">${r.senal}</span>`
-    : r.comprimido
-      ? `<span class="badge sq">COMPRIMIDO ${r.barrasComprimido}</span>`
-      : `<span class="badge none">—</span>`;
+    : r.bloqueadaPorTendencia
+      ? `<span class="badge none" style="color:var(--squeeze)">DESCARTADA · TENDENCIA</span>`
+      : r.comprimido
+        ? `<span class="badge sq">COMPRIMIDO ${r.barrasComprimido}</span>`
+        : `<span class="badge none">—</span>`;
   const R = r.reglas;
   return `<div class="card ${cl}" data-sym="${r.symbol}">
     <div class="crow">
@@ -1859,7 +1870,7 @@ escanear();
 
 /* ---------- 14. APP INSTALABLE ---------- */
 
-const VERSION = '1.6.0';
+const VERSION = '1.6.1';
 
 // Registro del service worker. Solo funciona sobre https (o localhost al probar):
 // desde un archivo suelto el navegador no lo permite, y no es un error.
