@@ -352,6 +352,8 @@ table.det td:last-child{text-align:right;font-family:var(--mono);font-weight:600
     <div class="grid">
       <div class="fld"><label>Temporalidad</label>
         <select id="tf">
+          <option value="1">1 minuto</option>
+          <option value="3">3 minutos</option>
           <option value="5">5 minutos</option>
           <option value="15" selected>15 minutos</option>
           <option value="30">30 minutos</option>
@@ -366,7 +368,10 @@ table.det td:last-child{text-align:right;font-family:var(--mono);font-weight:600
       <div class="fld"><label>Keltner — múltiplo ATR</label><input type="number" id="kcMult" value="2" step="0.1"></div>
       <div class="fld"><label>Volumen — SMA</label><input type="number" id="volLen" value="20" min="2"></div>
       <div class="fld"><label>Volumen — múltiplo mínimo</label><input type="number" id="volMult" value="1.5" step="0.1"></div>
+      <div class="fld"><label>Comisión por lado (%)</label><input type="number" id="comision" value="0.055" step="0.005" min="0"></div>
     </div>
+    <div class="hint" id="costeOut">La comisión no cambia ninguna señal: sirve para calcular
+    cuánto de tu ganancia bruta se van los costes en la temporalidad elegida.</div>
     <label class="switch" style="margin-top:6px">
       <input type="checkbox" id="usarTendencia">
       <span>Quinta regla: filtro de tendencia</span>
@@ -665,7 +670,7 @@ function esAccion(sym){
 
 /* ---------- 4. CLIENTE DE LA API PÚBLICA DE BYBIT ---------- */
 
-const MS = { '5':3e5, '15':9e5, '30':18e5, '60':36e5, '240':144e5, 'D':864e5 };
+const MS = { '1':6e4, '3':18e4, '5':3e5, '15':9e5, '30':18e5, '60':36e5, '240':144e5, 'D':864e5 };
 
 async function api(ruta){
   const url = S.cfg.host + ruta;
@@ -735,6 +740,7 @@ async function enTanda(items, limite, fn, onProg){
 const POR_DEFECTO = {
   host:'https://api.bybit.com', uni:'todos', topN:60, minTurn:5000000, manual:'',
   tf:'15', bbLen:20, bbMult:2, kcLen:20, atrLen:20, kcMult:2, volLen:20, volMult:1.5,
+  comision:0.055,
   usarTendencia:false, emaTendLen:200,
   stopMult:1.5, objMult:3, trailMult:2, usarObjetivo:true, usarTrailing:true,
   vivo:true, autoScan:true, notif:false, sound:true, wake:false, rth:true
@@ -783,7 +789,7 @@ function cargar(){
 
 const $ = id => document.getElementById(id);
 const CAMPOS = ['host','uni','topN','minTurn','manual','tf','bbLen','bbMult','kcLen','atrLen',
-  'kcMult','volLen','volMult','usarTendencia','emaTendLen',
+  'kcMult','volLen','volMult','comision','usarTendencia','emaTendLen',
   'stopMult','objMult','trailMult','usarObjetivo','usarTrailing',
   'vivo','autoScan','notif','sound','wake','rth'];
 
@@ -802,6 +808,7 @@ function formularioACfg(){
   });
   guardar();
   actualizarSubtitulo();
+  actualizarCoste();
   programarAuto();
 }
 
@@ -905,6 +912,49 @@ function importarDatos(texto){
   aviso(nPos + nBit + nHist + nFav === 0
     ? 'Ya tenías todo: nada nuevo que añadir'
     : `Añadido: ${nBit} operaciones, ${nPos} posiciones, ${nHist} señales, ${nFav} favoritos`);
+}
+
+/* Calcula, con el ATR real de lo que se acaba de escanear, cuánto se llevan las
+   comisiones de la ganancia bruta. En temporalidades cortas el ATR es diminuto y
+   el coste fijo se vuelve dominante — esto lo hace visible antes de operar. */
+function actualizarCoste(){
+  const caja = $('costeOut');
+  if (!caja) return;
+  const base = 'La comisión no cambia ninguna señal: sirve para calcular cuánto de tu '
+             + 'ganancia bruta se van los costes en la temporalidad elegida.';
+  const atrs = S.resultados
+    .filter(r => r.atrVal > 0 && r.cierre > 0)
+    .map(r => r.atrVal / r.cierre * 100)
+    .sort((a,b) => a-b);
+  if (!atrs.length){ caja.innerHTML = base; return; }
+
+  const atrMed = atrs[Math.floor(atrs.length/2)];
+  const c = S.cfg;
+  const objetivo = c.objMult * atrMed;          // % de precio
+  const riesgo   = c.stopMult * atrMed;
+  const coste    = 2 * c.comision;              // ida y vuelta
+  const pctObj   = coste / objetivo * 100;
+  const enR      = coste / riesgo;
+
+  const color = pctObj < 12 ? 'var(--buy)' : pctObj < 30 ? 'var(--squeeze)' : 'var(--sell)';
+  const veredicto = pctObj < 12
+    ? 'Los costes son marginales aquí.'
+    : pctObj < 30
+      ? 'Los costes ya pesan: hacen falta bastantes más aciertos para compensarlos.'
+      : 'A este ritmo la comisión se come la ventaja. Cada operación arranca muy en contra.';
+
+  caja.innerHTML =
+    `${base}<br><br>`
+    + `Con el ATR mediano de este escaneo (<b>${atrMed.toFixed(3)} %</b>) en `
+    + `<b>${tf_texto_corto()}</b>, tu objetivo de ${c.objMult}×ATR son <b>${objetivo.toFixed(3)} %</b> `
+    + `y la ida y vuelta cuesta <b>${coste.toFixed(3)} %</b>.<br>`
+    + `<b style="color:${color}">La comisión se lleva el ${pctObj.toFixed(0)} % de la ganancia bruta `
+    + `(${enR.toFixed(2)}R por operación).</b><br>${veredicto}`;
+}
+
+function tf_texto_corto(){
+  const t = S.cfg.tf;
+  return t === 'D' ? '1 día' : t === '240' ? '4 horas' : t === '60' ? '1 hora' : t + ' min';
 }
 
 function actualizarSubtitulo(){
@@ -1025,6 +1075,7 @@ async function escanear(){
 
     registrarSenales(S.resultados.filter(r => r.senal));
     S.ultimoEscaneo = Date.now();
+    actualizarCoste();
     S.bloqueadas = S.resultados.filter(r => r.bloqueadaPorTendencia).length;
     estado(`Listo ${hora(Date.now())}`
       + (S.bloqueadas ? ` · ${S.bloqueadas} descartada${S.bloqueadas > 1 ? 's' : ''} por tendencia` : '')
@@ -1870,7 +1921,7 @@ escanear();
 
 /* ---------- 14. APP INSTALABLE ---------- */
 
-const VERSION = '1.6.1';
+const VERSION = '1.7.0';
 
 // Registro del service worker. Solo funciona sobre https (o localhost al probar):
 // desde un archivo suelto el navegador no lo permite, y no es un error.
