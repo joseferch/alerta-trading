@@ -6,7 +6,7 @@
    que no sea de este mismo origen se deja pasar directo a la red.
 */
 
-const VERSION = '1.8.0';
+const VERSION = '1.9.0';
 const CACHE = `alerta-trading-${VERSION}`;
 
 const SHELL = [
