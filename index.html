@@ -372,6 +372,13 @@ table.det td:last-child{text-align:right;font-family:var(--mono);font-weight:600
     </div>
     <div class="hint" id="costeOut">La comisión no cambia ninguna señal: sirve para calcular
     cuánto de tu ganancia bruta se van los costes en la temporalidad elegida.</div>
+
+    <label class="switch"><input type="checkbox" id="autoPreset" checked>
+      <span>Ajustar parámetros al cambiar de temporalidad</span></label>
+    <div class="btnrow" style="margin-top:2px">
+      <button class="btn2" id="btnPreset">Ajustar a esta temporalidad ahora</button>
+    </div>
+    <div class="hint" id="presetOut"></div>
     <label class="switch" style="margin-top:6px">
       <input type="checkbox" id="usarTendencia">
       <span>Quinta regla: filtro de tendencia</span>
@@ -737,10 +744,30 @@ async function enTanda(items, limite, fn, onProg){
 
 /* ---------- 5. ESTADO Y PERSISTENCIA ---------- */
 
+/* Ajustes sugeridos por temporalidad.
+
+   Los períodos se mantienen parecidos porque cada marco busca su propia
+   compresión: en 1 minuto interesa la de los últimos minutos, no la de
+   cinco horas. Lo que sí cambia de verdad es el múltiplo de volumen: cuanto
+   más corta la vela, más irregular es el volumen y más alto hay que poner el
+   listón para que una sola orden grande no dispare la regla 4.
+
+   Son proporciones razonadas, no valores probados en backtest. */
+const PRESETS = {
+  '1':   { bbLen:40, kcLen:40, atrLen:40, volLen:40, volMult:2.5, emaTendLen:240 },
+  '3':   { bbLen:30, kcLen:30, atrLen:30, volLen:30, volMult:2.0, emaTendLen:240 },
+  '5':   { bbLen:25, kcLen:25, atrLen:25, volLen:25, volMult:1.8, emaTendLen:200 },
+  '15':  { bbLen:20, kcLen:20, atrLen:20, volLen:20, volMult:1.5, emaTendLen:200 },
+  '30':  { bbLen:20, kcLen:20, atrLen:20, volLen:20, volMult:1.5, emaTendLen:200 },
+  '60':  { bbLen:20, kcLen:20, atrLen:20, volLen:20, volMult:1.4, emaTendLen:200 },
+  '240': { bbLen:20, kcLen:20, atrLen:20, volLen:20, volMult:1.3, emaTendLen:200 },
+  'D':   { bbLen:20, kcLen:20, atrLen:20, volLen:20, volMult:1.3, emaTendLen:200 },
+};
+
 const POR_DEFECTO = {
   host:'https://api.bybit.com', uni:'todos', topN:60, minTurn:5000000, manual:'',
   tf:'15', bbLen:20, bbMult:2, kcLen:20, atrLen:20, kcMult:2, volLen:20, volMult:1.5,
-  comision:0.055,
+  comision:0.055, autoPreset:true,
   usarTendencia:false, emaTendLen:200,
   stopMult:1.5, objMult:3, trailMult:2, usarObjetivo:true, usarTrailing:true,
   vivo:true, autoScan:true, notif:false, sound:true, wake:false, rth:true
@@ -789,7 +816,7 @@ function cargar(){
 
 const $ = id => document.getElementById(id);
 const CAMPOS = ['host','uni','topN','minTurn','manual','tf','bbLen','bbMult','kcLen','atrLen',
-  'kcMult','volLen','volMult','comision','usarTendencia','emaTendLen',
+  'kcMult','volLen','volMult','comision','autoPreset','usarTendencia','emaTendLen',
   'stopMult','objMult','trailMult','usarObjetivo','usarTrailing',
   'vivo','autoScan','notif','sound','wake','rth'];
 
@@ -917,6 +944,55 @@ function importarDatos(texto){
 /* Calcula, con el ATR real de lo que se acaba de escanear, cuánto se llevan las
    comisiones de la ganancia bruta. En temporalidades cortas el ATR es diminuto y
    el coste fijo se vuelve dominante — esto lo hace visible antes de operar. */
+/* Aplica los períodos y el múltiplo de volumen sugeridos para la temporalidad.
+   No toca stop, objetivo ni trailing: esos van en múltiplos de ATR y ya se
+   adaptan solos al marco, porque el ATR es más pequeño en velas más cortas. */
+function aplicarPreset(tf, silencioso){
+  const p = PRESETS[tf];
+  if (!p) return false;
+  const antes = { bbLen:S.cfg.bbLen, volMult:S.cfg.volMult, emaTendLen:S.cfg.emaTendLen };
+  Object.assign(S.cfg, p);
+  cfgAlFormulario();
+  guardar();
+  actualizarSubtitulo();
+  actualizarCoste();
+  describirPreset();
+  const cambio = antes.bbLen !== p.bbLen || antes.volMult !== p.volMult
+              || antes.emaTendLen !== p.emaTendLen;
+  if (!silencioso){
+    aviso(cambio
+      ? `Parámetros ajustados a ${tf_texto_corto()} · períodos ${p.bbLen}, volumen ${p.volMult}×`
+      : `Ya estaban ajustados para ${tf_texto_corto()}`);
+  }
+  return cambio;
+}
+
+function describirPreset(){
+  const caja = $('presetOut');
+  if (!caja) return;
+  const p = PRESETS[S.cfg.tf];
+  if (!p){ caja.textContent = ''; return; }
+  const c = S.cfg;
+  const min = { '1':1,'3':3,'5':5,'15':15,'30':30,'60':60,'240':240,'D':1440 }[c.tf] || 15;
+  const horas = v => {
+    const h = v * min / 60;
+    return h < 1 ? `${Math.round(h*60)} min` : h < 48 ? `${h.toFixed(1)} h` : `${(h/24).toFixed(1)} días`;
+  };
+  const igual = c.bbLen === p.bbLen && c.volLen === p.volLen && c.volMult === p.volMult
+             && c.emaTendLen === p.emaTendLen;
+  caja.innerHTML =
+    `Sugerido para <b>${tf_texto_corto()}</b>: períodos <b>${p.bbLen}</b> `
+    + `(${horas(p.bbLen)} de contexto), volumen <b>≥${p.volMult}×</b>, `
+    + `tendencia EMA <b>${p.emaTendLen}</b> (${horas(p.emaTendLen)}).`
+    + (igual ? ' <span style="color:var(--buy)">Ya lo tienes así.</span>'
+             : ' <span style="color:var(--squeeze)">Tu configuración actual difiere.</span>')
+    + `<br><br>En velas cortas el volumen es mucho más irregular, así que el listón sube: `
+    + `una sola orden grande no debería bastar para cumplir la regla 4. `
+    + `El stop, el objetivo y el trailing no se tocan — van en múltiplos de ATR y ya se `
+    + `ajustan solos.<br><br><i>Son proporciones razonadas, no valores probados. `
+    + `Úsalos como punto de partida y deja que la bitácora decida.</i>`;
+}
+
 function actualizarCoste(){
   const caja = $('costeOut');
   if (!caja) return;
@@ -1773,7 +1849,7 @@ $('btnSound').onclick = () => {
 $('btnReset').onclick = () => {
   ['tf','bbLen','bbMult','kcLen','atrLen','kcMult','volLen','volMult','usarTendencia','emaTendLen']
     .forEach(k => { S.cfg[k] = POR_DEFECTO[k]; });
-  cfgAlFormulario(); guardar(); actualizarSubtitulo();
+  cfgAlFormulario(); guardar(); actualizarSubtitulo(); describirPreset(); actualizarCoste();
 };
 $('btnClear').onclick = () => {
   if (!confirm('¿Borrar todo el historial de señales?')) return;
@@ -1839,16 +1915,24 @@ CAMPOS.forEach(k => {
   if (!el) return;
   el.addEventListener('change', () => {
     formularioACfg();
+    // Al cambiar de temporalidad, reajustar los períodos si el usuario lo pidió
+    if (k === 'tf'){
+      if (S.cfg.autoPreset){ aplicarPreset(S.cfg.tf); return; }
+      describirPreset();
+    }
+    if (k === 'autoPreset'){ describirPreset(); }
     // La app no tiene botón de guardar porque guarda sola; esto lo hace visible.
     aviso(['tf','bbLen','bbMult','kcLen','atrLen','kcMult','volLen','volMult',
            'uni','topN','minTurn','manual'].includes(k)
       ? 'Guardado · pulsa Escanear para aplicarlo'
       : 'Guardado');
+    if (['bbLen','kcLen','atrLen','volLen','volMult','emaTendLen'].includes(k)) describirPreset();
   });
 });
 
 $('btnAplicar').onclick = () => { formularioACfg(); $('cfg').classList.remove('on');
                                   $('btnCfg').classList.remove('on'); escanear(); };
+$('btnPreset').onclick = () => { formularioACfg(); aplicarPreset(S.cfg.tf); };
 $('btnExportar').onclick = exportarDatos;
 $('btnImportar').onclick = () => $('archivoImportar').click();
 $('archivoImportar').addEventListener('change', e => {
@@ -1911,6 +1995,7 @@ document.addEventListener('visibilitychange', () => {
 cargar();
 cfgAlFormulario();
 actualizarSubtitulo();
+describirPreset();
 $('btnSound').classList.toggle('on', S.cfg.sound);
 $('btnSound').textContent = S.cfg.sound ? '🔔' : '🔕';
 pintar();
@@ -1921,7 +2006,7 @@ escanear();
 
 /* ---------- 14. APP INSTALABLE ---------- */
 
-const VERSION = '1.7.0';
+const VERSION = '1.8.0';
 
 // Registro del service worker. Solo funciona sobre https (o localhost al probar):
 // desde un archivo suelto el navegador no lo permite, y no es un error.
