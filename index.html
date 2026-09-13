@@ -226,7 +226,9 @@ table.det td:last-child{text-align:right;font-family:var(--mono);font-weight:600
 .aviso button{background:var(--accent);color:#fff;padding:8px 13px;font-size:12.5px;font-weight:650;flex:0 0 auto}
 .aviso .no{background:transparent;color:var(--dim2);padding:8px 4px;font-size:18px}
 
-.hist{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);font-size:12.5px}
+.hist{display:flex;align-items:center;gap:10px;padding:11px 4px;border-bottom:1px solid var(--line);font-size:12.5px;cursor:pointer;border-radius:8px}
+.hist:active{background:var(--panel2)}
+.trade{cursor:pointer}
 .hist .t{font-family:var(--mono);font-size:11px;color:var(--dim2);flex:0 0 auto}
 
 /* ---------- posiciones en seguimiento ---------- */
@@ -638,7 +640,8 @@ function analizar(cs, C, opts){
     emaTend: emaT,
     tendencia: !C.usarTendencia || !tendConocida ? null : (c.c > emaT ? 'alcista' : 'bajista'),
     distEma: (C.usarTendencia && tendConocida && emaT > 0) ? (c.c - emaT)/emaT*100 : null,
-    cierre:c.c, hora:c.t, volRatio:ratio,
+    cierre:c.c, apertura:c.o, alto:c.h, bajo:c.l, volumen:c.v, hora:c.t, volRatio:ratio,
+    volMedia: volAvg[i],
     entradaRef: entrada, aperturaReal: hayApertura,
     deslizamiento: c.c > 0 ? (entrada - c.c)/c.c*100 : 0,
     bbU:bbU[i], bbL:bbL[i], kcU:kcU[i], kcL:kcL[i], atrVal:a,
@@ -837,6 +840,34 @@ function formularioACfg(){
   actualizarSubtitulo();
   actualizarCoste();
   programarAuto();
+}
+
+/* Foto del momento exacto de la señal. Se guarda con el historial y viaja con la
+   operación hasta la bitácora, para poder revisar meses después por qué entraste.
+   Solo números sueltos: las velas completas ocuparían demasiado en el teléfono. */
+function snapshotSenal(r){
+  const c = S.cfg;
+  return {
+    tf: c.tf, hora: r.hora,
+    // la vela de liberación
+    apertura: r.apertura, alto: r.alto, bajo: r.bajo, cierre: r.cierre,
+    volumen: r.volumen, volMedia: r.volMedia, volRatio: r.volRatio,
+    // el estado de las bandas en ese instante
+    bbU: r.bbU, bbL: r.bbL, kcU: r.kcU, kcL: r.kcL,
+    atr: r.atrVal, anchoBB: r.anchoBB, barras: r.barrasComprimido,
+    // la entrada y los niveles que se derivaron
+    entrada: r.entradaRef, aperturaReal: r.aperturaReal, deslizamiento: r.deslizamiento,
+    stop: r.stopRef, objetivo: r.objetivoRef,
+    // el contexto
+    reglas: r.reglas, tendencia: r.tendencia, emaTend: r.emaTend,
+    distEma: r.distEma, usaTendencia: r.usaTendencia,
+    turnover: r.turnover, accion: r.accion,
+    // los parámetros con los que se calculó, para saber con qué reglas salió
+    params: { bbLen:c.bbLen, bbMult:c.bbMult, kcLen:c.kcLen, atrLen:c.atrLen,
+              kcMult:c.kcMult, volLen:c.volLen, volMult:c.volMult,
+              emaTendLen: c.usarTendencia ? c.emaTendLen : null,
+              stopMult:c.stopMult, objMult:c.objMult, trailMult:c.trailMult },
+  };
 }
 
 /* ---------- Favoritos ---------- */
@@ -1066,7 +1097,7 @@ function duracion(ms){
   const h = Math.floor(m/60);
   return h < 24 ? h + ' h ' + (m%60) + ' min' : Math.floor(h/24) + ' d ' + (h%24) + ' h';
 }
-const pc = x => (x >= 0 ? '+' : '') + x.toFixed(2) + ' %';
+const pc = x => (x == null || !isFinite(x)) ? '—' : (x >= 0 ? '+' : '') + x.toFixed(2) + ' %';
 
 /* ---------- 7. ESCANEO ---------- */
 
@@ -1178,7 +1209,8 @@ function registrarSenales(nuevas){
     if (S.vistas.has(clave)) continue;
     S.vistas.add(clave);
     const reg = { symbol:r.symbol, senal:r.senal, cierre:r.cierre,
-                  volRatio:r.volRatio, hora:r.hora, tf:S.cfg.tf, ts:Date.now() };
+                  volRatio:r.volRatio, hora:r.hora, tf:S.cfg.tf, ts:Date.now(),
+                  snap: snapshotSenal(r) };
     S.historial.unshift(reg);
     frescas.push(r);
   }
@@ -1258,6 +1290,7 @@ function abrirPosicion(r){
     symbol: r.symbol, dir: r.senal, tf: c.tf, accion: !!r.accion,
     entrada, entradaTs: Date.now(), velaTs: r.hora, atr: atrV,
     cierreSenal: r.cierre, aperturaReal: !!r.aperturaReal,
+    snap: snapshotSenal(r),          // viaja con la operación hasta la bitácora
     stopMult: c.stopMult, objMult: c.objMult, trailMult: c.trailMult,
     usarTrailing: c.usarTrailing, usarObjetivo: c.usarObjetivo,
     stopFijo:  largo ? entrada - c.stopMult*atrV : entrada + c.stopMult*atrV,
@@ -1515,7 +1548,7 @@ function tarjetaPos(p){
 
 function filaTrade(t){
   const gana = t.pct > 0;
-  return `<div class="trade ${gana?'win':'loss'}">
+  return `<div class="trade ${gana?'win':'loss'}" data-trade="${t.id}">
     <div class="crow">
       <span class="sym" style="font-size:13.5px">${t.symbol}</span>
       <span class="badge ${t.dir==='COMPRA'?'buy':'sell'}" style="font-size:10px">${t.dir}</span>
@@ -1616,12 +1649,13 @@ function pintar(){
 
   if (S.tab === 'hist'){
     out.innerHTML = S.historial.length
-      ? S.historial.map(h => `<div class="hist">
+      ? S.historial.map((h, i) => `<div class="hist" data-hist="${i}">
           <span class="t">${fecha(h.hora)}</span>
           <b>${h.symbol}</b>
           <span class="badge ${h.senal==='COMPRA'?'buy':'sell'}">${h.senal}</span>
           <span class="spacer"></span>
           <span class="mono" style="font-size:11.5px">${precio(h.cierre)} · ${h.volRatio?h.volRatio.toFixed(2):'—'}×</span>
+          ${h.snap ? '<span style="color:var(--dim2);font-size:15px">›</span>' : ''}
         </div>`).join('')
       : `<div class="empty"><div class="ico">🗒</div><p>Aún no hay señales registradas</p></div>`;
     return;
@@ -1726,6 +1760,153 @@ function abrirDetalle(sym){
   requestAnimationFrame(()=>dibujar(r));
 }
 function cerrarModal(){ $('modal').className = ''; }
+
+/* ---------- Ficha de una señal guardada ---------- */
+
+function bloqueSnapshot(s){
+  if (!s) return '<p class="hint">Esta entrada es anterior a la versión que guarda el detalle.</p>';
+  const f = (a,b) => `<tr><td>${a}</td><td>${b}</td></tr>`;
+  const si = b => b ? '<span style="color:var(--buy)">SÍ</span>'
+                    : '<span style="color:var(--sell)">NO</span>';
+  const R = s.reglas || {};
+  const p = s.params || {};
+  const rango = (s.alto != null && s.bajo != null && s.bajo > 0)
+    ? ((s.alto - s.bajo)/s.bajo*100).toFixed(2) + ' %' : '—';
+  const cuerpo = (s.apertura && s.cierre)
+    ? ((s.cierre - s.apertura)/s.apertura*100).toFixed(2) + ' %' : '—';
+
+  return `
+  <h3 style="font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin:16px 0 8px">
+    La vela de liberación</h3>
+  <table class="det">
+    ${f('Cerró a las', `${fecha(s.hora)} · ${s.tf === 'D' ? '1 día' : s.tf + ' min'}`)}
+    ${f('Apertura', precio(s.apertura))}
+    ${f('Máximo', precio(s.alto))}
+    ${f('Mínimo', precio(s.bajo))}
+    ${f('Cierre', precio(s.cierre))}
+    ${f('Cuerpo de la vela', cuerpo)}
+    ${f('Rango máx-mín', rango)}
+  </table>
+
+  <h3 style="font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin:16px 0 8px">
+    Volumen</h3>
+  <table class="det">
+    ${f('De esta vela', s.volumen != null ? s.volumen.toLocaleString('en-US', {maximumFractionDigits:0}) : '—')}
+    ${f(`Media de ${p.volLen || 20} velas`, s.volMedia != null ? s.volMedia.toLocaleString('en-US', {maximumFractionDigits:0}) : '—')}
+    ${f('Múltiplo alcanzado', s.volRatio != null
+        ? `<b style="color:var(--buy)">${s.volRatio.toFixed(2)}×</b> (exigido ${p.volMult || '—'}×)` : '—')}
+    ${s.turnover ? f('Volumen 24 h del par', '$' + usd(s.turnover)) : ''}
+  </table>
+
+  <h3 style="font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin:16px 0 8px">
+    Bandas en ese instante</h3>
+  <table class="det">
+    ${f('Bollinger superior', precio(s.bbU))}
+    ${f('Bollinger inferior', precio(s.bbL))}
+    ${f('Keltner superior', precio(s.kcU))}
+    ${f('Keltner inferior', precio(s.kcL))}
+    ${f('Ancho de Bollinger', s.anchoBB != null ? s.anchoBB.toFixed(2) + ' %' : '—')}
+    ${f('ATR', precio(s.atr))}
+    ${f('Velas comprimido antes', s.barras != null ? s.barras : '—')}
+  </table>
+
+  <h3 style="font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin:16px 0 8px">
+    Las reglas, una por una</h3>
+  <table class="det">
+    ${f('1 · Compresión previa', si(R.antes))}
+    ${f('2 · Liberación', si(R.libera))}
+    ${f('3 · Cierre fuera de Bollinger', si(R.fuera))}
+    ${f('4 · Volumen suficiente', si(R.volOk))}
+    ${s.usaTendencia ? f('5 · A favor de la tendencia',
+        si(R.tendOk) + (s.tendencia ? ` <span style="color:var(--dim)">(${s.tendencia})</span>` : '')) : ''}
+    ${s.usaTendencia && s.emaTend != null ? f(`EMA ${p.emaTendLen || ''}`,
+        precio(s.emaTend) + (s.distEma != null
+          ? ` <span style="color:var(--dim)">(${s.distEma >= 0 ? '+' : ''}${s.distEma.toFixed(2)} %)</span>` : '')) : ''}
+    ${s.accion ? f('Sesión regular de NY', si(R.sesOk)) : ''}
+  </table>
+
+  <h3 style="font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin:16px 0 8px">
+    Entrada y niveles calculados</h3>
+  <table class="det">
+    ${f('Entrada · apertura siguiente', precio(s.entrada) +
+        (s.deslizamiento != null
+          ? ` <span style="color:var(--dim)">(${s.deslizamiento >= 0 ? '+' : ''}${s.deslizamiento.toFixed(2)} % vs cierre)</span>`
+          : ''))}
+    ${f(`Stop (${p.stopMult || '—'}×ATR)`, precio(s.stop))}
+    ${f(`Objetivo (${p.objMult || '—'}×ATR)`, precio(s.objetivo))}
+  </table>
+
+  <p class="hint">Reglas con las que salió esta señal: BB ${p.bbLen},${p.bbMult} ·
+  KC EMA${p.kcLen}±${p.kcMult}·ATR${p.atrLen} · Vol ≥${p.volMult}×${
+    p.emaTendLen ? ` · Tendencia EMA${p.emaTendLen}` : ''}.<br>
+  Si después cambiaste los parámetros, esta señal se calculó con los de arriba, no con los de ahora.</p>`;
+}
+
+function verSenalGuardada(i){
+  const h = S.historial[i];
+  if (!h) return;
+  const largo = h.senal === 'COMPRA';
+  $('sheet').dataset.sym = h.symbol;
+  $('sheet').innerHTML = `
+    <div class="shead">
+      <div style="flex:1">
+        <h2 style="font-size:18px">${h.symbol}</h2>
+        <div style="font-size:11.5px;color:var(--dim)">Señal del ${fecha(h.hora)}</div>
+      </div>
+      <span class="badge ${largo?'buy':'sell'}" style="font-size:13px;padding:6px 12px">${h.senal}</span>
+      <button class="icobtn" onclick="cerrarModal()">×</button>
+    </div>
+    ${bloqueSnapshot(h.snap)}
+    <a class="tvlink" target="_blank" rel="noopener"
+       href="https://www.tradingview.com/chart/?symbol=BYBIT:${h.symbol}.P&interval=${(h.snap&&h.snap.tf)||h.tf}">
+       Ver el gráfico en TradingView →</a>`;
+  $('modal').className = 'on';
+}
+
+function verTradeGuardado(id){
+  const t = S.bitacora.find(x => x.id === id);
+  if (!t) return;
+  const largo = t.dir === 'COMPRA';
+  const gana = t.pct > 0;
+  const f = (a,b) => `<tr><td>${a}</td><td>${b}</td></tr>`;
+  $('sheet').dataset.sym = t.symbol;
+  $('sheet').innerHTML = `
+    <div class="shead">
+      <div style="flex:1">
+        <h2 style="font-size:18px">${t.symbol}</h2>
+        <div style="font-size:11.5px;color:var(--dim)">${fecha(t.entradaTs)} → ${fecha(t.salidaTs)}</div>
+      </div>
+      <span class="badge ${largo?'buy':'sell'}">${t.dir}</span>
+      <button class="icobtn" onclick="cerrarModal()">×</button>
+    </div>
+
+    <div style="text-align:center;margin:6px 0 14px">
+      <div class="pnl ${gana?'up':'dn'}" style="font-size:30px">${pc(t.pct)}</div>
+      <div style="font-size:12.5px;color:var(--dim)">
+        ${t.r >= 0 ? '+' : ''}${(t.r||0).toFixed(2)}R · ${MOTIVOS[t.motivo] || t.motivo} · duró ${duracion(t.duracion)}
+      </div>
+    </div>
+
+    <h3 style="font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin:16px 0 8px">
+      Entrada y salida</h3>
+    <table class="det">
+      ${f('Entrada', precio(t.entrada) + ` <span style="color:var(--dim)">${fecha(t.entradaTs)}</span>`)}
+      ${t.cierreSenal != null ? f('Cierre de la vela de señal', precio(t.cierreSenal)) : ''}
+      ${f('Salida', precio(t.salida) + ` <span style="color:var(--dim)">${fecha(t.salidaTs)}</span>`)}
+      ${f('Motivo de la salida', MOTIVOS[t.motivo] || t.motivo)}
+      ${f('Stop inicial', precio(t.stopFijo))}
+      ${f('Stop al cerrar', precio(t.stopActual) + (t.trailActivo ? ' <span class="trailon">TRAILING</span>' : ''))}
+      ${f('Objetivo', precio(t.objetivo))}
+      ${f('Máximo a favor', pc(t.maxFavPct))}
+      ${f('Máximo en contra', pc(t.maxAdvPct))}
+      ${f('Riesgo asumido', precio(t.riesgo))}
+    </table>
+    ${bloqueSnapshot(t.snap)}
+    <a class="tvlink" target="_blank" rel="noopener"
+       href="https://www.tradingview.com/chart/?symbol=BYBIT:${t.symbol}.P&interval=${t.tf}">
+       Ver el gráfico en TradingView →</a>`;
+  $('modal').className = 'on';
+}
 
 // Botón de seguimiento: solo tiene sentido sobre una señal viva y sin posición abierta
 function botonSeguir(r){
@@ -1884,6 +2065,10 @@ document.querySelectorAll('.tab').forEach(b => b.onclick = () => {
 });
 
 $('out').addEventListener('click', e => {
+  const hist = e.target.closest('[data-hist]');
+  if (hist){ verSenalGuardada(+hist.dataset.hist); return; }
+  const trade = e.target.closest('[data-trade]');
+  if (trade){ verTradeGuardado(trade.dataset.trade); return; }
   const fav = e.target.closest('[data-fav]');
   if (fav){ e.stopPropagation(); alternarFavorito(fav.dataset.fav); return; }
   const cerrar = e.target.closest('[data-cerrar]');
@@ -2006,7 +2191,7 @@ escanear();
 
 /* ---------- 14. APP INSTALABLE ---------- */
 
-const VERSION = '1.8.0';
+const VERSION = '1.9.0';
 
 // Registro del service worker. Solo funciona sobre https (o localhost al probar):
 // desde un archivo suelto el navegador no lo permite, y no es un error.
