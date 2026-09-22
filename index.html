@@ -371,6 +371,7 @@ table.det td:last-child{text-align:right;font-family:var(--mono);font-weight:600
       <div class="fld"><label>Volumen — SMA</label><input type="number" id="volLen" value="20" min="2"></div>
       <div class="fld"><label>Volumen — múltiplo mínimo</label><input type="number" id="volMult" value="1.5" step="0.1"></div>
       <div class="fld"><label>Comisión por lado (%)</label><input type="number" id="comision" value="0.055" step="0.005" min="0"></div>
+      <div class="fld"><label>Apalancamiento</label><input type="number" id="apalanc" value="3" step="1" min="1" max="20"></div>
     </div>
     <div class="hint" id="costeOut">La comisión no cambia ninguna señal: sirve para calcular
     cuánto de tu ganancia bruta se van los costes en la temporalidad elegida.</div>
@@ -399,6 +400,7 @@ table.det td:last-child{text-align:right;font-family:var(--mono);font-weight:600
 
     <div class="btnrow">
       <button class="btn2 pri" id="btnAplicar">Aplicar y escanear</button>
+      <button class="btn2" id="btnClaras">Modo señales claras</button>
       <button class="btn2" id="btnReset">Restaurar reglas originales</button>
     </div>
     <div class="hint">Los cambios se guardan solos, no hace falta ningún botón de guardar.
@@ -770,7 +772,7 @@ const PRESETS = {
 const POR_DEFECTO = {
   host:'https://api.bybit.com', uni:'todos', topN:60, minTurn:5000000, manual:'',
   tf:'15', bbLen:20, bbMult:2, kcLen:20, atrLen:20, kcMult:2, volLen:20, volMult:1.5,
-  comision:0.055, autoPreset:true,
+  comision:0.055, autoPreset:true, apalanc:3,
   usarTendencia:false, emaTendLen:200,
   stopMult:1.5, objMult:3, trailMult:2, usarObjetivo:true, usarTrailing:true,
   vivo:true, autoScan:true, notif:false, sound:true, wake:false, rth:true
@@ -819,7 +821,7 @@ function cargar(){
 
 const $ = id => document.getElementById(id);
 const CAMPOS = ['host','uni','topN','minTurn','manual','tf','bbLen','bbMult','kcLen','atrLen',
-  'kcMult','volLen','volMult','comision','autoPreset','usarTendencia','emaTendLen',
+  'kcMult','volLen','volMult','comision','apalanc','autoPreset','usarTendencia','emaTendLen',
   'stopMult','objMult','trailMult','usarObjetivo','usarTrailing',
   'vivo','autoScan','notif','sound','wake','rth'];
 
@@ -1062,6 +1064,23 @@ function actualizarCoste(){
 function tf_texto_corto(){
   const t = S.cfg.tf;
   return t === 'D' ? '1 día' : t === '240' ? '4 horas' : t === '60' ? '1 hora' : t + ' min';
+}
+
+/* Traduce una señal a lo que significa para tu dinero con tu apalancamiento.
+   Las comisiones se cobran sobre el tamaño apalancado, por eso también se multiplican. */
+function impactoCuenta(entrada, stop, objetivo){
+  const L = S.cfg.apalanc || 1;
+  if (!(entrada > 0) || stop == null || objetivo == null) return null;
+  const gana = Math.abs(objetivo - entrada) / entrada * 100 * L;
+  const pierde = Math.abs(entrada - stop) / entrada * 100 * L;
+  const coste = 2 * S.cfg.comision * L;
+  return { L, gana, pierde, coste, ganaNeto: gana - coste, pierdeNeto: pierde + coste,
+           liq: 100 / L };
+}
+function textoImpacto(i){
+  if (!i) return '';
+  return `con ${i.L}×: <b style="color:var(--buy)">+${i.ganaNeto.toFixed(2)}%</b> / `
+       + `<b style="color:var(--sell)">−${i.pierdeNeto.toFixed(2)}%</b>`;
 }
 
 function actualizarSubtitulo(){
@@ -1427,7 +1446,10 @@ function estadisticas(){
     totalPct: sum(t.map(x => x.pct)),
     totalR: sum(t.map(x => x.r || 0)),
     factor: pPct > 0 ? gPct/pPct : (gPct > 0 ? Infinity : 0),
-    duracionMedia: sum(t.map(x => x.duracion || 0))/t.length
+    duracionMedia: sum(t.map(x => x.duracion || 0))/t.length,
+    // lo que habría significado para tu dinero: cada trade multiplicado por el
+    // apalancamiento, menos las comisiones sobre el tamaño apalancado
+    totalApal: sum(t.map(x => x.pct * (S.cfg.apalanc||1) - 2 * S.cfg.comision * (S.cfg.apalanc||1)))
   };
 }
 
@@ -1486,6 +1508,8 @@ function tarjeta(r){
       <span>Ancho BB <b>${r.anchoBB!=null?r.anchoBB.toFixed(2)+'%':'—'}</b></span>
       ${r.turnover?`<span>24h <b>$${usd(r.turnover)}</b></span>`:''}
       <span>Cierre <b>${hora(r.hora)}</b></span>
+      ${r.senal ? `<span style="width:100%">${textoImpacto(impactoCuenta(r.entradaRef, r.stopRef, r.objetivoRef))}
+        <span style="color:var(--dim2)">(comisiones incluidas)</span></span>` : ''}
     </div>
     <div class="rules">
       <div class="rule ${R.antes?'ok':'no'}">1 Compresión</div>
@@ -1536,6 +1560,7 @@ function tarjetaPos(p){
       <div><label>Actual</label><b>${precio(p.ultimo)}</b></div>
       <div><label>Stop${p.trailActivo?'<span class="trailon">TRAILING</span>':''}</label><b>${precio(p.stopActual)}</b></div>
       <div><label>R actual</label><b class="${rAct>=0?'':''}">${rAct>=0?'+':''}${rAct.toFixed(2)}R</b></div>
+      <div><label>Con ${S.cfg.apalanc}× (neto)</label><b style="color:${pct>=0?'var(--buy)':'var(--sell)'}">${pc(pct*S.cfg.apalanc - 2*S.cfg.comision*S.cfg.apalanc)}</b></div>
       <div><label>Máximo a favor</label><b>${pc(p.maxFavPct)}</b></div>
       <div><label>Tiempo</label><b>${duracion(Date.now()-p.entradaTs)}</b></div>
     </div>
@@ -1574,6 +1599,8 @@ function panelEstadisticas(){
     <div class="stat"><label>Operaciones</label><b>${e.n}</b></div>
     <div class="stat"><label>Tasa de acierto</label><b>${e.tasa.toFixed(0)} %</b></div>
     <div class="stat"><label>Resultado total</label><b style="color:${col(e.totalPct)}">${pc(e.totalPct)}</b></div>
+    <div class="stat"><label>Total con ${S.cfg.apalanc}× neto</label><b style="color:${col(e.totalApal)}">${pc(e.totalApal)}</b></div>
+    <div class="stat"><label>Por operación ${S.cfg.apalanc}×</label><b style="color:${col(e.totalApal)}">${pc(e.totalApal/e.n)}</b></div>
     <div class="stat"><label>Total en R</label><b style="color:${col(e.totalR)}">${e.totalR>=0?'+':''}${e.totalR.toFixed(2)}R</b></div>
     <div class="stat"><label>Ganancia media</label><b style="color:var(--buy)">${pc(e.mediaGana)}</b></div>
     <div class="stat"><label>Pérdida media</label><b style="color:var(--sell)">${pc(e.mediaPierde)}</b></div>
@@ -1746,6 +1773,12 @@ function abrirDetalle(sym){
       ${fila('Keltner inferior', precio(r.kcL))}
       ${fila('ATR (' + S.cfg.atrLen + ')', precio(r.atrVal))}
       ${fila('Ancho de Bollinger', r.anchoBB!=null?r.anchoBB.toFixed(2)+' %':'—')}
+      ${r.senal ? (() => { const i = impactoCuenta(r.entradaRef, r.stopRef, r.objetivoRef); return i ?
+          fila(`Si llega al objetivo (${i.L}×)`, `<span style="color:var(--buy)">+${i.ganaNeto.toFixed(2)} %</span>`) +
+          fila(`Si toca el stop (${i.L}×)`, `<span style="color:var(--sell)">−${i.pierdeNeto.toFixed(2)} %</span>`) +
+          fila('Comisiones ida y vuelta', `−${i.coste.toFixed(2)} %`) +
+          fila('Liquidación', `~${i.liq.toFixed(0)} % en contra <span style="color:var(--dim)">(el stop llega mucho antes)</span>`)
+          : ''; })() : ''}
       ${r.senal ? fila('Referencia de stop (1.5·ATR)', precio(r.stopRef)) : ''}
       ${r.senal ? fila('Referencia de objetivo (3·ATR)', precio(r.objetivoRef)) : ''}
     </table>
@@ -2117,6 +2150,14 @@ CAMPOS.forEach(k => {
 
 $('btnAplicar').onclick = () => { formularioACfg(); $('cfg').classList.remove('on');
                                   $('btnCfg').classList.remove('on'); escanear(); };
+$('btnClaras').onclick = () => {
+  // Menos señales, solo las rupturas limpias: a favor de la tendencia y con volumen fuerte
+  const base = (PRESETS[S.cfg.tf] || {}).volMult || 1.5;
+  S.cfg.usarTendencia = true;
+  S.cfg.volMult = Math.max(2, +(base + 0.5).toFixed(1));
+  cfgAlFormulario(); guardar(); actualizarSubtitulo(); describirPreset();
+  aviso(`Señales claras: tendencia activa y volumen ≥${S.cfg.volMult}× · pulsa Escanear`);
+};
 $('btnPreset').onclick = () => { formularioACfg(); aplicarPreset(S.cfg.tf); };
 $('btnExportar').onclick = exportarDatos;
 $('btnImportar').onclick = () => $('archivoImportar').click();
@@ -2191,7 +2232,7 @@ escanear();
 
 /* ---------- 14. APP INSTALABLE ---------- */
 
-const VERSION = '1.9.0';
+const VERSION = '1.10.0';
 
 // Registro del service worker. Solo funciona sobre https (o localhost al probar):
 // desde un archivo suelto el navegador no lo permite, y no es un error.
