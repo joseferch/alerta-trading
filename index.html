@@ -337,6 +337,7 @@ table.det td:last-child{text-align:right;font-family:var(--mono);font-weight:600
           <option value="todos">Todos los perpetuos USDT</option>
           <option value="top">Top N por volumen 24h</option>
           <option value="cripto">Solo cripto principales</option>
+          <option value="scalping">Pares de scalping (grupo 2)</option>
           <option value="original">Los 10 del script original</option>
           <option value="manual">Lista manual</option>
         </select>
@@ -346,7 +347,18 @@ table.det td:last-child{text-align:right;font-family:var(--mono);font-weight:600
     </div>
     <div class="fld" style="margin-top:10px"><label>Lista manual (separada por comas)</label>
       <input id="manual" placeholder="BTCUSDT, ETHUSDT, SOLUSDT"></div>
-    <div class="hint">El filtro de volumen 24h descarta pares sin liquidez, donde el criterio de 1.5× se dispara con muy poco dinero y la señal no es fiable.</div>
+    <div class="btnrow">
+      <button class="btn2" id="btnFavScalp">Marcar pares de scalping como favoritos</button>
+      <button class="btn2" id="btnLista" title="Ver la lista">Ver la lista</button>
+    </div>
+    <div class="hint" id="uniOut">El filtro de volumen 24h descarta pares sin liquidez, donde el criterio
+    de 1.5× se dispara con muy poco dinero y la señal no es fiable.<br><br>
+    <b>Pares de scalping (grupo 2)</b> es una lista corta de pares con buen volumen y movimiento
+    suficiente para velas de 1, 3 y 5 minutos: ni tan quietos como BTC o ETH, ni tan traicioneros
+    como las memecoins. Marcarlos como favoritos los deja siempre en el escaneo, aunque después
+    cambies de universo o de filtro de volumen.<br><br>
+    El volumen cambia con los meses: cada tanto conviene ordenar la lista de derivados de Bybit
+    por volumen de 24 horas y revisar que estos sigan arriba.</div>
   </div>
 
   <div class="cfgbox">
@@ -783,6 +795,15 @@ const PRINCIPALES = ['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','BNBUSDT','DOGEUSDT
   'AVAXUSDT','LINKUSDT','DOTUSDT','MATICUSDT','LTCUSDT','TRXUSDT','ATOMUSDT','NEARUSDT',
   'APTUSDT','ARBUSDT','OPUSDT','SUIUSDT','INJUSDT'];
 
+/* Pares de scalping (el "grupo 2"): volumen suficiente para entrar y salir al precio
+   que ves, y movimiento suficiente para que el objetivo pague las comisiones. Es el
+   punto medio entre BTC/ETH (muy quietos en velas cortas) y las memecoins (mucho
+   movimiento, pero mechazos que sacan del stop). El volumen cambia con los meses:
+   conviene revisarlo cada tanto en la lista de derivados de Bybit. */
+const SCALPING = ['SOLUSDT','XRPUSDT','BNBUSDT','LINKUSDT','AVAXUSDT','SUIUSDT','APTUSDT',
+  'ADAUSDT','LTCUSDT','NEARUSDT','ARBUSDT','OPUSDT','TIAUSDT','INJUSDT','SEIUSDT',
+  'DOTUSDT','ATOMUSDT','FILUSDT','BCHUSDT'];
+
 const S = {
   cfg: { ...POR_DEFECTO },
   universo: [], resultados: [], historial: [],
@@ -890,6 +911,22 @@ function alternarFavorito(sym){
   pintar();
   // Si el detalle está abierto sobre ese activo, refrescar su estrella
   if ($('modal').className === 'on' && $('sheet').dataset.sym === sym) abrirDetalle(sym);
+}
+
+/* Marca de una vez toda la lista de scalping. Los favoritos entran siempre al
+   escaneo, así que con esto quedan vigilados sin importar el universo elegido. */
+function favoritosScalping(){
+  const nuevos = SCALPING.filter(s => !esFavorito(s));
+  if (!nuevos.length){
+    aviso('Los pares de scalping ya estaban en favoritos');
+    return 0;
+  }
+  S.favoritos.push(...nuevos);
+  S.favoritos.sort();
+  guardar();
+  pintar();
+  aviso(`${nuevos.length} pares añadidos a favoritos · pulsa Escanear`);
+  return nuevos.length;
 }
 
 const estrella = sym =>
@@ -1136,8 +1173,8 @@ async function resolverUniverso(){
     lista = ORIGINALES.map(symbol => ({ symbol, turnover:0, cambio:0 }));
   } else {
     todos = await cargarUniverso();       // datos reales del mercado
-    if (c.uni === 'cripto'){
-      const set = new Set(PRINCIPALES);
+    if (c.uni === 'cripto' || c.uni === 'scalping'){
+      const set = new Set(c.uni === 'scalping' ? SCALPING : PRINCIPALES);
       lista = todos.filter(t => set.has(t.symbol));
     } else {
       lista = todos.filter(t => t.turnover >= c.minTurn);
@@ -2159,6 +2196,19 @@ $('btnClaras').onclick = () => {
   aviso(`Señales claras: tendencia activa y volumen ≥${S.cfg.volMult}× · pulsa Escanear`);
 };
 $('btnPreset').onclick = () => { formularioACfg(); aplicarPreset(S.cfg.tf); };
+$('btnFavScalp').onclick = favoritosScalping;
+$('btnLista').onclick = () => {
+  const n = SCALPING.length;
+  const marcados = SCALPING.filter(esFavorito).length;
+  $('uniOut').innerHTML =
+    `<b>Pares de scalping (grupo 2) — ${n} pares</b><br>` +
+    SCALPING.map(s => esFavorito(s) ? `<b>★ ${s.replace('USDT','')}</b>` : s.replace('USDT',''))
+            .join(' · ') +
+    `<br><br>${marcados} de ${n} están marcados como favoritos. ` +
+    `Los marcados (★) se escanean siempre, aunque cambies de universo.<br><br>` +
+    `Si alguno ya no tiene volumen en Bybit, simplemente no aparecerá en el escaneo: ` +
+    `la app solo analiza los pares que el exchange devuelve.`;
+};
 $('btnExportar').onclick = exportarDatos;
 $('btnImportar').onclick = () => $('archivoImportar').click();
 $('archivoImportar').addEventListener('change', e => {
@@ -2232,7 +2282,7 @@ escanear();
 
 /* ---------- 14. APP INSTALABLE ---------- */
 
-const VERSION = '1.10.0';
+const VERSION = '1.11.0';
 
 // Registro del service worker. Solo funciona sobre https (o localhost al probar):
 // desde un archivo suelto el navegador no lo permite, y no es un error.
