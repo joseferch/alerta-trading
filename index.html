@@ -159,6 +159,9 @@ main{padding:12px 14px 40px}
 .switch{display:flex;align-items:center;gap:9px;padding:8px 0;cursor:pointer}
 .switch input{width:auto;margin:0;accent-color:var(--accent);width:17px;height:17px}
 .switch span{font-size:12.5px}
+.switch.mini{padding:2px 0;gap:6px}
+.switch.mini input{width:15px;height:15px}
+.switch.mini span{font-size:12px;color:var(--dim)}
 .btnrow{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
 .btn2{background:var(--panel2);color:var(--txt);border:1px solid var(--line);padding:9px 14px;font-size:12.5px;font-weight:600;flex:1;min-width:110px}
 .btn2.pri{background:var(--accent);border-color:var(--accent);color:#fff}
@@ -408,6 +411,47 @@ table.det td:last-child{text-align:right;font-family:var(--mono);font-weight:600
       Viene apagado a propósito. Enciéndelo, deja correr dos semanas y compara en la bitácora
       contra lo que tenías: así el filtro se gana el puesto con tus datos, no con una teoría.
       Ojo, va a reducir bastante el número de señales.
+    </div>
+
+    <label class="switch" style="margin-top:6px">
+      <input type="checkbox" id="usarConf">
+      <span>Sexta regla: tocando las bandas en varias temporalidades</span>
+    </label>
+    <div class="grid">
+      <div class="fld"><label>Temporalidades a revisar</label>
+        <div style="display:flex;flex-wrap:wrap;gap:6px 12px;padding-top:4px">
+          <label class="switch mini"><input type="checkbox" id="conf1"><span>1 min</span></label>
+          <label class="switch mini"><input type="checkbox" id="conf3"><span>3 min</span></label>
+          <label class="switch mini"><input type="checkbox" id="conf5"><span>5 min</span></label>
+          <label class="switch mini"><input type="checkbox" id="conf15"><span>15 min</span></label>
+          <label class="switch mini"><input type="checkbox" id="conf30"><span>30 min</span></label>
+          <label class="switch mini"><input type="checkbox" id="conf60"><span>1 hora</span></label>
+        </div>
+      </div>
+      <div class="fld"><label>Cuántas deben coincidir</label>
+        <select id="confMin">
+          <option value="0">Todas las marcadas</option>
+          <option value="5">Al menos 5</option>
+          <option value="4">Al menos 4</option>
+          <option value="3">Al menos 3</option>
+          <option value="2">Al menos 2</option>
+        </select>
+      </div>
+    </div>
+    <div class="hint">
+      Cuando una señal aparece, la app va a revisar esas temporalidades y comprueba si el precio
+      está <b>tocando la banda de Bollinger</b> en cada una (el máximo de la vela llega al borde
+      superior en una compra, o el mínimo al borde inferior en una venta). Si no llegan al mínimo
+      que pides, la señal se muestra como <b style="color:var(--squeeze)">descartada</b> en vez
+      de avisarte.<br><br>
+      Las bandas se calculan con velas ya cerradas, pero el toque se busca también en la vela en
+      curso: lo que importa es si el precio está pegado a la banda <b>ahora</b>.<br><br>
+      <b>Ojo con exigir las seis.</b> Que el minuto y la hora estén tocando banda al mismo tiempo
+      pasa pocas veces al día en todo el mercado; es la señal más fuerte que vas a ver, pero
+      también la más rara. Si te quedas sin señales, baja el mínimo a 4 y mira el detalle de cada
+      una: ahí aparece temporalidad por temporalidad cuál tocaba y cuál no, y a qué distancia quedó.<br><br>
+      Esto solo se consulta para los activos que ya dieron señal, así que no hace el escaneo
+      más lento de forma apreciable.
     </div>
 
     <div class="btnrow">
@@ -744,6 +788,77 @@ async function velas(symbol, tf, limite){
   return { cerradas, aperturaSig: enCurso ? enCurso.o : null };
 }
 
+/* ---------- Confluencia multi-temporalidad (sexta regla, opcional) ----------
+   Una ruptura vale más si el precio también está pegado a la banda de Bollinger
+   en las demás temporalidades: significa que el movimiento no es solo del minuto,
+   sino que arrastra a las velas grandes. Esto se consulta SOLO para los activos
+   que ya dieron señal, no para el universo entero: si no, serían miles de
+   peticiones en cada escaneo. */
+
+const TFS_CONF = ['1','3','5','15','30','60'];
+const tfNombre = tf => tf === '60' ? '1 h' : tf === '240' ? '4 h' : tf === 'D' ? '1 día' : tf + ' min';
+const tfsConfluencia = C => TFS_CONF.filter(t => C['conf' + t]);
+
+/* ¿El precio está tocando la banda de Bollinger en esa temporalidad?
+   Las bandas se calculan con velas cerradas (nunca con la vela en curso, que
+   todavía puede cambiar), pero el toque se busca también en la vela en curso:
+   lo que importa es si el precio está pegado a la banda AHORA. */
+async function tocaBandas(symbol, tf, C, dir){
+  const limite = Math.max(C.bbLen + 30, 60);
+  const res = await api(`/v5/market/kline?category=linear&symbol=${symbol}&interval=${tf}&limit=${limite}`);
+  const dur = MS[tf], ahora = Date.now();
+  const todas = (res.list || [])
+    .map(k => ({ t:+k[0], o:+k[1], h:+k[2], l:+k[3], c:+k[4] }))
+    .sort((a,b) => a.t - b.t);
+  const cerradas = todas.filter(k => k.t + dur <= ahora);
+  if (cerradas.length < C.bbLen + 1) return { tf, ok:false, motivo:'sin velas' };
+
+  const close = cerradas.map(k => k.c);
+  const base = sma(close, C.bbLen), dev = stdev(close, C.bbLen);
+  const i = cerradas.length - 1;
+  if (base[i] == null || dev[i] == null) return { tf, ok:false, motivo:'sin datos' };
+
+  const bbU = base[i] + C.bbMult*dev[i];
+  const bbL = base[i] - C.bbMult*dev[i];
+  const ult = cerradas[i];
+  const curso = todas.find(k => k.t === ult.t + dur) || null;
+  const alto = curso ? Math.max(ult.h, curso.h) : ult.h;
+  const bajo = curso ? Math.min(ult.l, curso.l) : ult.l;
+  const toca = dir === 'COMPRA' ? alto >= bbU : bajo <= bbL;
+  // Qué tan lejos quedó de la banda, en % — útil cuando no toca
+  const ref = dir === 'COMPRA' ? bbU : bbL;
+  const extremo = dir === 'COMPRA' ? alto : bajo;
+  return { tf, ok:true, toca, bbU, bbL, alto, bajo,
+           dist: ref > 0 ? Math.abs(extremo - ref)/ref*100 : null };
+}
+
+async function confirmarConfluencia(lista, C){
+  const tfs = tfsConfluencia(C);
+  const cands = lista.filter(r => r.senal);
+  if (!tfs.length || !cands.length) return;
+
+  const pedido = parseInt(C.confMin, 10) || 0;
+  const min = pedido > 0 ? Math.min(pedido, tfs.length) : tfs.length;
+  estado(`Confirmando ${cands.length} señal${cands.length>1?'es':''} en ${tfs.length} temporalidades…`);
+
+  await enTanda(cands, 4, async (r) => {
+    const detalle = [];
+    for (const tf of tfs){
+      try { detalle.push(await tocaBandas(r.symbol, tf, C, r.senal)); }
+      catch(e){ detalle.push({ tf, ok:false, motivo:'error' }); }
+    }
+    const tocan = detalle.filter(d => d.ok && d.toca).length;
+    const ok = tocan >= min;
+    r.conf = { detalle, tocan, min, total: tfs.length, ok };
+    if (!ok){
+      // Se guarda qué señal habría sido, para poder mostrarla como descartada
+      r.senalConf = r.senal;
+      r.senal = null;
+      r.bloqueadaPorConf = true;
+    }
+  });
+}
+
 // Ejecuta tareas con un límite de peticiones simultáneas
 async function enTanda(items, limite, fn, onProg){
   const out = new Array(items.length);
@@ -786,6 +901,8 @@ const POR_DEFECTO = {
   tf:'15', bbLen:20, bbMult:2, kcLen:20, atrLen:20, kcMult:2, volLen:20, volMult:1.5,
   comision:0.055, autoPreset:true, apalanc:3,
   usarTendencia:false, emaTendLen:200,
+  usarConf:false, conf1:true, conf3:true, conf5:true, conf15:true, conf30:true, conf60:true,
+  confMin:'0',
   stopMult:1.5, objMult:3, trailMult:2, usarObjetivo:true, usarTrailing:true,
   vivo:true, autoScan:true, notif:false, sound:true, wake:false, rth:true
 };
@@ -809,7 +926,8 @@ const S = {
   universo: [], resultados: [], historial: [],
   posiciones: [], bitacora: [], favoritos: [],
   tab:'sig', escaneando:false, timer:null, tick:null, vivoTimer:null, wakeLock:null,
-  vistas:new Set(), interactuado:false, ultimoEscaneo:null, ocultoDesde:null, bloqueadas:0
+  vistas:new Set(), interactuado:false, ultimoEscaneo:null, ocultoDesde:null,
+  bloqueadas:0, bloqConf:0
 };
 ['pointerdown','keydown'].forEach(ev =>
   addEventListener(ev, () => { S.interactuado = true; }, { once:true, passive:true }));
@@ -843,6 +961,7 @@ function cargar(){
 const $ = id => document.getElementById(id);
 const CAMPOS = ['host','uni','topN','minTurn','manual','tf','bbLen','bbMult','kcLen','atrLen',
   'kcMult','volLen','volMult','comision','apalanc','autoPreset','usarTendencia','emaTendLen',
+  'usarConf','conf1','conf3','conf5','conf15','conf30','conf60','confMin',
   'stopMult','objMult','trailMult','usarObjetivo','usarTrailing',
   'vivo','autoScan','notif','sound','wake','rth'];
 
@@ -885,6 +1004,9 @@ function snapshotSenal(r){
     reglas: r.reglas, tendencia: r.tendencia, emaTend: r.emaTend,
     distEma: r.distEma, usaTendencia: r.usaTendencia,
     turnover: r.turnover, accion: r.accion,
+    // la confluencia de temporalidades, si estaba encendida
+    conf: r.conf ? { tocan: r.conf.tocan, total: r.conf.total, min: r.conf.min,
+                     tfs: r.conf.detalle.map(d => ({ tf:d.tf, toca: d.ok ? !!d.toca : null })) } : null,
     // los parámetros con los que se calculó, para saber con qué reglas salió
     params: { bbLen:c.bbLen, bbMult:c.bbMult, kcLen:c.kcLen, atrLen:c.atrLen,
               kcMult:c.kcMult, volLen:c.volLen, volMult:c.volMult,
@@ -1125,6 +1247,8 @@ function actualizarSubtitulo(){
   $('subtitle').textContent =
     `BB ${c.bbLen},${c.bbMult} · KC EMA${c.kcLen}±${c.kcMult}·ATR${c.atrLen} · Vol ≥${c.volMult}×`
     + (c.usarTendencia ? ` · Tend EMA${c.emaTendLen}` : '')
+    + (c.usarConf && tfsConfluencia(c).length
+        ? ` · Bandas ${(parseInt(c.confMin,10) || tfsConfluencia(c).length)}/${tfsConfluencia(c).length} tf` : '')
     + ` · ${c.tf==='D'?'1D':c.tf+'m'}`;
 }
 
@@ -1231,6 +1355,11 @@ async function escanear(){
 
     const errores = res.filter(r => r && r.error).length;
     S.resultados = res.filter(r => r && r.ok);
+
+    // Sexta regla, si está encendida: solo las señales que además están pegadas
+    // a la banda en las otras temporalidades sobreviven.
+    if (c.usarConf) await confirmarConfluencia(S.resultados, c);
+
     S.resultados.sort((a,b) =>
       (b.senal?2:0) - (a.senal?2:0) ||
       (b.comprimido?1:0) - (a.comprimido?1:0) ||
@@ -1240,8 +1369,10 @@ async function escanear(){
     S.ultimoEscaneo = Date.now();
     actualizarCoste();
     S.bloqueadas = S.resultados.filter(r => r.bloqueadaPorTendencia).length;
+    S.bloqConf = S.resultados.filter(r => r.bloqueadaPorConf).length;
     estado(`Listo ${hora(Date.now())}`
       + (S.bloqueadas ? ` · ${S.bloqueadas} descartada${S.bloqueadas > 1 ? 's' : ''} por tendencia` : '')
+      + (S.bloqConf ? ` · ${S.bloqConf} por confluencia` : '')
       + (errores ? ` · ${errores} sin datos` : ''), 'live');
     pintar();
   }catch(e){
@@ -1529,6 +1660,8 @@ function tarjeta(r){
     ? `<span class="badge ${r.senal==='COMPRA'?'buy':'sell'}">${r.senal}</span>`
     : r.bloqueadaPorTendencia
       ? `<span class="badge none" style="color:var(--squeeze)">DESCARTADA · TENDENCIA</span>`
+      : r.bloqueadaPorConf
+      ? `<span class="badge none" style="color:var(--squeeze)">DESCARTADA · ${r.conf.tocan}/${r.conf.total} TEMPORALIDADES</span>`
       : r.comprimido
         ? `<span class="badge sq">COMPRIMIDO ${r.barrasComprimido}</span>`
         : `<span class="badge none">—</span>`;
@@ -1554,6 +1687,7 @@ function tarjeta(r){
       <div class="rule ${R.fuera?'ok':'no'}">3 Fuera BB</div>
       <div class="rule ${R.volOk?'ok':'no'}">4 Volumen</div>
       ${r.usaTendencia?`<div class="rule ${R.tendOk?'ok':'no'}">5 Tendencia</div>`:''}
+      ${r.conf?`<div class="rule ${r.conf.ok?'ok':'no'}">6 Bandas ${r.conf.tocan}/${r.conf.total}</div>`:''}
       ${r.accion?`<div class="rule ${R.sesOk?'ok':'no'}">Sesión</div>`:''}
     </div>
   </div>`;
@@ -1648,6 +1782,10 @@ function panelEstadisticas(){
 
 function pintar(){
   const senales = S.resultados.filter(r => r.senal);
+  // Las que habrían sido señal pero las paró un filtro se muestran igual, abajo y
+  // marcadas: así se ve el trabajo de los filtros en vez de desaparecer en silencio.
+  const descartadas = S.resultados.filter(r => !r.senal &&
+    (r.bloqueadaPorTendencia || r.bloqueadaPorConf));
   const comprimidos = S.resultados.filter(r => !r.senal && r.comprimido);
   const abiertas = S.posiciones.filter(p => p.abierta);
   // Los favoritos se muestran siempre, tengan señal o no: son tu lista de vigilancia
@@ -1725,7 +1863,8 @@ function pintar(){
     return;
   }
 
-  const datos = S.tab === 'sig' ? senales : S.tab === 'sq' ? comprimidos : S.resultados;
+  const datos = S.tab === 'sig' ? senales.concat(descartadas)
+              : S.tab === 'sq' ? comprimidos : S.resultados;
 
   if (!S.resultados.length){
     out.innerHTML = `<div class="empty"><div class="ico">◈</div>
@@ -1735,7 +1874,7 @@ function pintar(){
   }
   if (!datos.length){
     const msg = S.tab === 'sig'
-      ? ['🔍','Ninguna señal confirmada','Las cuatro reglas deben cumplirse en la misma vela. Revise <b>Comprimidos</b> para ver qué activos están por liberarse.']
+      ? ['🔍','Ninguna señal confirmada','Las reglas tienen que cumplirse todas en la misma vela. Revise <b>Comprimidos</b> para ver qué activos están por liberarse. Si tiene filtros encendidos y hubo rupturas, aparecerían aquí marcadas como descartadas.']
       : ['📉','Ningún activo comprimido','Ahora mismo ningún par tiene las Bollinger dentro del Keltner.'];
     out.innerHTML = `<div class="empty"><div class="ico">${msg[0]}</div><p><b>${msg[1]}</b></p><p>${msg[2]}</p></div>`;
     return;
@@ -1795,6 +1934,15 @@ function abrirDetalle(sym){
       ${fila('4 · Volumen ≥ ' + S.cfg.volMult + '×', si(R.volOk) + ' <span style="color:var(--dim)">(' + (r.volRatio?r.volRatio.toFixed(2):'—') + '×)</span>')}
       ${r.usaTendencia ? fila('5 · A favor de la tendencia', si(R.tendOk) +
           (r.tendencia ? ` <span style="color:var(--dim)">(${r.tendencia})</span>` : ' <span style="color:var(--squeeze)">(sin datos)</span>')) : ''}
+      ${r.conf ? fila(`6 · Tocando Bollinger en otras temporalidades`,
+          si(r.conf.ok) + ` <span style="color:var(--dim)">(${r.conf.tocan} de ${r.conf.total}, mínimo ${r.conf.min})</span>`) : ''}
+      ${r.conf ? r.conf.detalle.map(d => fila(
+          `<span style="color:var(--dim)">· ${tfNombre(d.tf)}</span>`,
+          !d.ok ? '<span style="color:var(--squeeze)">sin datos</span>'
+                : d.toca ? '<span style="color:var(--buy)">tocando la banda</span>'
+                         : `<span style="color:var(--sell)">no</span>` +
+                           (d.dist != null ? ` <span style="color:var(--dim)">(a ${d.dist.toFixed(2)} %)</span>` : '')
+        )).join('') : ''}
       ${r.usaTendencia && r.emaTend != null ? fila(`EMA ${S.cfg.emaTendLen}`,
           precio(r.emaTend) + (r.distEma != null
             ? ` <span style="color:var(--dim)">(${r.distEma >= 0 ? '+' : ''}${r.distEma.toFixed(2)} %)</span>` : '')) : ''}
@@ -1892,6 +2040,14 @@ function bloqueSnapshot(s){
     ${s.usaTendencia && s.emaTend != null ? f(`EMA ${p.emaTendLen || ''}`,
         precio(s.emaTend) + (s.distEma != null
           ? ` <span style="color:var(--dim)">(${s.distEma >= 0 ? '+' : ''}${s.distEma.toFixed(2)} %)</span>` : '')) : ''}
+    ${s.conf ? f('6 · Tocando bandas en otras temporalidades',
+        si(s.conf.tocan >= s.conf.min) +
+        ` <span style="color:var(--dim)">(${s.conf.tocan} de ${s.conf.total})</span>`) : ''}
+    ${s.conf ? s.conf.tfs.map(t => f(
+        `<span style="color:var(--dim)">· ${tfNombre(t.tf)}</span>`,
+        t.toca == null ? '<span style="color:var(--squeeze)">sin datos</span>'
+                       : t.toca ? '<span style="color:var(--buy)">tocando</span>'
+                                : '<span style="color:var(--sell)">no</span>')).join('') : ''}
     ${s.accion ? f('Sesión regular de NY', si(R.sesOk)) : ''}
   </table>
 
@@ -2282,7 +2438,7 @@ escanear();
 
 /* ---------- 14. APP INSTALABLE ---------- */
 
-const VERSION = '1.11.0';
+const VERSION = '1.12.0';
 
 // Registro del service worker. Solo funciona sobre https (o localhost al probar):
 // desde un archivo suelto el navegador no lo permite, y no es un error.
